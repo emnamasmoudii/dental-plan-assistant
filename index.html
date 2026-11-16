@@ -98,10 +98,6 @@
         <option value="fr-FR">Français</option>
       </select>
       <span class="status" id="micStatus"></span>
-      <span class="spacer"></span>
-      <span class="status">Exemples :</span>
-      <button id="exampleEnBtn" class="ghost">EN notes</button>
-      <button id="exampleBtn" class="ghost">FR</button>
     </div>
     <button id="genBtn" class="primary" disabled>Générer le plan de traitement</button>
     <div id="genStatus" class="status" style="margin-top:8px"></div>
@@ -222,8 +218,7 @@ $("micBtn").onclick = () => {
   $("micBtn").textContent = "⏹ Arrêter"; $("micBtn").classList.add("rec");
   $("micStatus").textContent = "Parlez... le texte apparaît en direct.";
 };
-$("exampleBtn").onclick = () => { $("dictation").value = EXAMPLE; refreshGen(); };
-$("exampleEnBtn").onclick = () => { $("dictation").value = EXAMPLE_EN; refreshGen(); };
+
 $("dictation").oninput = refreshGen;
 function refreshGen() { $("genBtn").disabled = !$("dictation").value.trim(); }
 
@@ -338,7 +333,7 @@ $("loadBtn").onclick = () => loadEngine().catch(() => {});
 const preload = () => { if (mode() === "ai" && navigator.gpu && !state.engine && !state.loading) loadEngine().catch(() => {}); };
 ["focus", "input"].forEach(ev => $("dictation").addEventListener(ev, preload));
 $("micBtn").addEventListener("click", preload);
-$("exampleBtn").addEventListener("click", preload);
+
 if (!navigator.gpu) {
   $("gpuWarn").classList.remove("hidden"); $("loadBtn").disabled = true;
   document.querySelector('input[name=mode][value=rules]').checked = true;
