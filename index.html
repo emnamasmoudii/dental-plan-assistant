@@ -6,111 +6,110 @@
 <title>Assistant IA dentaire - plan de traitement</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-  :root { --ink:#1f2a30; --muted:#5f6b70; --line:#dde3e1; --bg:#f6f8f7; --card:#fff;
-          --accent:#0f6e56; --accent-soft:#e1f5ee; --warn:#8a5a00; --warn-soft:#fdf3dc; --err:#a32d2d; --err-soft:#fcebeb; }
-  * { box-sizing: border-box; }
-  body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color:var(--ink); background:var(--bg); line-height:1.5; }
-  header { background:var(--accent); color:#fff; padding:18px 24px; }
-  header h1 { margin:0; font-size:20px; font-weight:600; }
-  header p { margin:2px 0 0; opacity:.85; font-size:14px; }
-  main { max-width:1100px; margin:0 auto; padding:20px 16px 60px; display:grid; gap:16px; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px 20px; }
-  h2 { font-size:16px; margin:0 0 12px; display:flex; align-items:center; gap:8px; }
-  .step { display:inline-grid; place-items:center; width:24px; height:24px; border-radius:50%; background:var(--accent); color:#fff; font-size:13px; }
-  textarea { width:100%; min-height:120px; padding:10px 12px; border:1px solid var(--line); border-radius:8px; font:inherit; resize:vertical; }
-  button { font:inherit; border-radius:8px; border:1px solid var(--line); background:#fff; padding:8px 14px; cursor:pointer; }
-  button:hover:not(:disabled) { border-color:var(--accent); }
-  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
-  button:disabled { opacity:.5; cursor:not-allowed; }
-  button.rec { background:#c0392b; color:#fff; border-color:#c0392b; }
-  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:10px; }
+  :root { --ink:#16232a; --muted:#6b7a80; --line:#e6ecea; --bg:#f4f7f6; --card:#fff;
+          --accent:#0f7a5f; --accent-2:#13a07c; --accent-soft:#e7f6f0; --warn:#8a5a00; --warn-soft:#fff6e0;
+          --err:#a32d2d; --err-soft:#fdeeee; --radius:16px; --shadow:0 1px 2px rgba(16,40,32,.04),0 8px 24px rgba(16,40,32,.06); }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color:var(--ink); background:var(--bg); line-height:1.55; }
+  header { text-align:center; padding:36px 16px 8px; }
+  .logo { width:56px; height:56px; border-radius:16px; display:inline-grid; place-items:center; font-size:30px;
+          background:linear-gradient(135deg,var(--accent),var(--accent-2)); box-shadow:var(--shadow); }
+  header h1 { margin:14px 0 4px; font-size:26px; font-weight:600; letter-spacing:-.02em; }
+  header p { margin:0; color:var(--muted); font-size:15px; }
+  .stepper { display:flex; justify-content:center; gap:8px; flex-wrap:wrap; margin:18px 0 4px; font-size:13px; color:var(--muted); }
+  .stepper span { background:#fff; border:1px solid var(--line); border-radius:999px; padding:5px 12px; }
+  .stepper b { color:var(--accent); font-weight:600; margin-right:4px; }
+  main { max-width:1080px; margin:0 auto; padding:16px 16px 48px; display:grid; gap:18px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:22px 24px; box-shadow:var(--shadow); }
+  h2 { font-size:17px; font-weight:600; margin:0 0 14px; display:flex; align-items:center; gap:10px; }
+  .step { display:inline-grid; place-items:center; width:26px; height:26px; border-radius:50%; background:var(--accent-soft); color:var(--accent); font-size:13px; font-weight:600; }
+  textarea { width:100%; min-height:170px; padding:14px 16px; border:1.5px solid var(--line); border-radius:12px; font:inherit; font-size:15px; resize:vertical; background:#fbfcfc; transition:border-color .15s; }
+  textarea:focus, select:focus, input[type=text]:focus { outline:none; border-color:var(--accent-2); background:#fff; }
+  button { font:inherit; font-size:14px; border-radius:10px; border:1px solid var(--line); background:#fff; padding:9px 16px; cursor:pointer; transition:all .15s; }
+  button:hover:not(:disabled) { border-color:var(--accent-2); color:var(--accent); }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); font-weight:500; }
+  button.primary:hover:not(:disabled) { background:var(--accent-2); color:#fff; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  button.ghost { border:none; background:none; color:var(--muted); padding:6px 8px; text-decoration:underline; text-underline-offset:3px; }
+  #micBtn { border-radius:999px; padding:10px 20px; font-weight:500; background:var(--accent-soft); color:var(--accent); border-color:transparent; }
+  button.rec { background:#d64541 !important; color:#fff !important; animation:pulse 1.4s infinite; }
+  @keyframes pulse { 0%,100% { box-shadow:0 0 0 0 rgba(214,69,65,.45);} 50% { box-shadow:0 0 0 8px rgba(214,69,65,0);} }
+  #genBtn { width:100%; padding:13px; font-size:15px; margin-top:14px; border-radius:12px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:12px; }
+  .spacer { flex:1; }
   .status { font-size:13px; color:var(--muted); }
-  .bar { height:6px; background:var(--line); border-radius:3px; overflow:hidden; margin-top:6px; }
-  .bar > div { height:100%; width:0; background:var(--accent); transition:width .3s; }
-  .note { padding:10px 12px; border-radius:8px; font-size:14px; margin-top:10px; }
+  .bar { height:5px; background:var(--line); border-radius:3px; overflow:hidden; margin-top:8px; }
+  .bar > div { height:100%; width:0; background:var(--accent-2); transition:width .3s; }
+  .note { padding:10px 14px; border-radius:10px; font-size:14px; margin-top:12px; }
   .note.warn { background:var(--warn-soft); color:var(--warn); }
   .note.err { background:var(--err-soft); color:var(--err); }
   .note.ok { background:var(--accent-soft); color:var(--accent); }
-  .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
-  @media (max-width: 860px) { .grid2 { grid-template-columns: 1fr; } }
-  table { width:100%; table-layout:fixed; border-collapse:collapse; font-size:13px; margin-bottom:10px; }
-  th, td { text-align:left; padding:5px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
-  th { color:var(--muted); font-weight:500; }
+  .grid2 { display:grid; grid-template-columns:1.1fr 1fr; gap:20px; }
+  @media (max-width:880px) { .grid2 { grid-template-columns:1fr; } }
+  table { width:100%; table-layout:fixed; border-collapse:collapse; font-size:13px; margin-bottom:6px; }
+  th, td { text-align:left; padding:7px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:500; font-size:12px; }
   td.n, th.n { text-align:right; white-space:nowrap; }
-  .stage-title { background:var(--accent-soft); color:#085041; padding:6px 10px; border-radius:6px; font-weight:600; font-size:14px; margin:12px 0 4px; }
-  .total { display:flex; justify-content:space-between; background:var(--accent); color:#fff; padding:10px 14px; border-radius:8px; font-weight:600; margin-top:8px; }
-  iframe { width:100%; height:560px; border:1px solid var(--line); border-radius:8px; background:#fff; }
-  .q { padding:10px 0; border-bottom:1px solid var(--line); }
+  tr:last-child td { border-bottom:none; }
+  .stage-title { color:var(--accent); font-weight:600; font-size:14px; margin:18px 0 2px; padding-left:10px; border-left:3px solid var(--accent-2); }
+  .total { display:flex; justify-content:space-between; background:linear-gradient(135deg,var(--accent),var(--accent-2)); color:#fff; padding:14px 18px; border-radius:12px; font-weight:600; font-size:16px; margin-top:14px; }
+  iframe { width:100%; height:600px; border:1px solid var(--line); border-radius:12px; background:#fff; }
+  .q { padding:14px 0; border-bottom:1px solid var(--line); }
   .q:last-child { border-bottom:none; }
-  .q p { margin:0 0 6px; font-weight:500; }
-  .opts { display:flex; flex-wrap:wrap; gap:6px; }
-  .opts label { border:1px solid var(--line); border-radius:999px; padding:4px 12px; cursor:pointer; font-size:14px; }
+  .q p { margin:0 0 8px; font-weight:500; }
+  .opts { display:flex; flex-wrap:wrap; gap:8px; }
+  .opts label { border:1.5px solid var(--line); border-radius:999px; padding:6px 14px; cursor:pointer; font-size:14px; transition:all .15s; }
+  .opts label:hover { border-color:var(--accent-2); }
   .opts input { display:none; }
   .opts label:has(input:checked) { background:var(--accent); color:#fff; border-color:var(--accent); }
-  .q input[type=text] { margin-top:6px; width:100%; padding:6px 10px; border:1px solid var(--line); border-radius:6px; font:inherit; }
-  select, .settings input { font:inherit; padding:6px 8px; border:1px solid var(--line); border-radius:6px; }
+  .q input[type=text] { margin-top:8px; width:100%; padding:8px 12px; border:1.5px solid var(--line); border-radius:10px; font:inherit; font-size:14px; }
+  select { font:inherit; font-size:14px; padding:8px 10px; border:1px solid var(--line); border-radius:10px; background:#fff; }
   .settings { display:flex; gap:14px; flex-wrap:wrap; align-items:center; font-size:14px; }
-  .versions button { margin:4px 6px 0 0; }
+  details.card { padding:14px 24px; }
+  details summary { cursor:pointer; font-weight:500; color:var(--muted); list-style:none; }
+  details summary::-webkit-details-marker { display:none; }
+  details[open] summary { margin-bottom:14px; }
+  .versions button { margin:6px 6px 0 0; }
   .hidden { display:none !important; }
-  footer { text-align:center; font-size:12px; color:var(--muted); padding-bottom:24px; }
+  footer { text-align:center; font-size:12px; color:var(--muted); padding-bottom:28px; }
 </style>
 </head>
 <body>
 <header>
-  <h1>🦷 Assistant IA pour cabinet dentaire</h1>
-  <p>Le dentiste dicte, l'IA construit le plan de traitement (étapes, intervalles, prix), pose ses questions et régénère le PDF.</p>
+  <div class="logo">🦷</div>
+  <h1>Dental treatment plan assistant</h1>
+  <p>Dictez ou collez les notes du dentiste : le plan, les prix et le PDF sont prêts en un clic.</p>
+  <div class="stepper"><span><b>1</b>Dicter</span><span><b>2</b>Plan & PDF</span><span><b>3</b>Questions</span><span><b>4</b>PDF mis à jour</span></div>
 </header>
 
 <main>
-  <!-- Moteur IA -->
-  <section class="card">
-    <h2>🧠 Moteur</h2>
-    <div class="settings" style="margin-bottom:10px">
-      <label><input type="radio" name="mode" value="rules" checked> Mode rapide (instantané, notes en anglais ou en français)</label>
-      <label><input type="radio" name="mode" value="ai"> IA open source dans le navigateur (Qwen, Llama, Phi)</label>
-    </div>
-    <div class="settings">
-      <label>Modèle :
-        <select id="model">
-          <option value="Qwen2.5-1.5B-Instruct-q4f16_1-MLC" selected>Qwen2.5 1.5B - rapide, recommandé (~1 Go)</option>
-          <option value="Qwen2.5-0.5B-Instruct-q4f16_1-MLC">Qwen2.5 0.5B - ultra rapide, moins précis (~0,4 Go)</option>
-          <option value="Qwen2.5-3B-Instruct-q4f16_1-MLC">Qwen2.5 3B - meilleure qualité, plus lent (~2 Go)</option>
-          <option value="Llama-3.2-3B-Instruct-q4f16_1-MLC">Llama 3.2 3B (~2 Go)</option>
-          <option value="Phi-3.5-mini-instruct-q4f16_1-MLC">Phi-3.5 mini (~2,5 Go)</option>
-          <option value="Qwen2.5-7B-Instruct-q4f16_1-MLC">Qwen2.5 7B - plus précis (~5 Go, GPU puissant)</option>
-        </select>
-      </label>
-      <button id="loadBtn" class="primary">Charger l'IA</button>
-      
-    </div>
-    <div class="status" id="aiStatus">L'IA open source se télécharge une seule fois (elle démarre dès que vous commencez à dicter) puis reste en cache. Le plan est calculé sur votre ordinateur, sans serveur ni clé API.</div>
-    <div class="bar"><div id="aiBar"></div></div>
-    <div id="gpuWarn" class="note err hidden">Votre navigateur ne supporte pas WebGPU : l'IA ne peut pas tourner ici, le mode rapide est utilisé. Pour l'IA : Chrome ou Edge récent sur ordinateur.</div>
-  </section>
-
   <!-- 1. Dictée -->
   <section class="card">
-    <h2><span class="step">1</span> Dictée du dentiste</h2>
-    <textarea id="dictation" placeholder="Cliquez sur « Dicter » et parlez, ou tapez les notes du dentiste ici..."></textarea>
+    <h2><span class="step">1</span> Notes du dentiste</h2>
+    <textarea id="dictation" placeholder="Cliquez sur le micro et parlez, ou collez les notes du dentiste ici…"></textarea>
     <div class="row">
-      <select id="micLang" title="Langue de la dictée">
-        <option value="en-US" selected>🇬🇧 English</option>
-        <option value="en-GB">🇬🇧 English (UK)</option>
-        <option value="fr-FR">🇫🇷 Français</option>
-      </select>
       <button id="micBtn">🎤 Dicter</button>
-      <button id="exampleBtn">Exemple (FR)</button>
-      <button id="exampleEnBtn">Example (EN notes)</button>
-      <button id="genBtn" class="primary" disabled>Générer le plan de traitement</button>
+      <select id="micLang" title="Langue de la dictée">
+        <option value="en-US" selected>English</option>
+        <option value="en-GB">English (UK)</option>
+        <option value="fr-FR">Français</option>
+      </select>
       <span class="status" id="micStatus"></span>
+      <span class="spacer"></span>
+      <span class="status">Exemples :</span>
+      <button id="exampleEnBtn" class="ghost">EN notes</button>
+      <button id="exampleBtn" class="ghost">FR</button>
     </div>
+    <button id="genBtn" class="primary" disabled>Générer le plan de traitement</button>
     <div id="genStatus" class="status" style="margin-top:8px"></div>
   </section>
 
   <!-- 2. Plan + PDF -->
   <section class="card hidden" id="planCard">
-    <h2><span class="step">2</span> Plan de traitement - <span id="planVersion"></span></h2>
+    <h2><span class="step">2</span> Plan de traitement <span class="status" id="planVersion"></span></h2>
     <div class="grid2">
       <div id="planView"></div>
       <div>
@@ -130,8 +129,33 @@
     </div>
     <div class="versions" id="versions"></div>
   </section>
+
+  <!-- Paramètres (repliés) -->
+  <details class="card">
+    <summary>⚙️ Paramètres du moteur</summary>
+    <div class="settings" style="margin-bottom:10px">
+      <label><input type="radio" name="mode" value="rules" checked> Mode rapide (instantané)</label>
+      <label><input type="radio" name="mode" value="ai"> IA open source dans le navigateur</label>
+    </div>
+    <div class="settings">
+      <label>Modèle :
+        <select id="model">
+          <option value="Qwen2.5-1.5B-Instruct-q4f16_1-MLC" selected>Qwen2.5 1.5B · rapide (~1 Go)</option>
+          <option value="Qwen2.5-0.5B-Instruct-q4f16_1-MLC">Qwen2.5 0.5B · ultra rapide (~0,4 Go)</option>
+          <option value="Qwen2.5-3B-Instruct-q4f16_1-MLC">Qwen2.5 3B · meilleure qualité (~2 Go)</option>
+          <option value="Llama-3.2-3B-Instruct-q4f16_1-MLC">Llama 3.2 3B (~2 Go)</option>
+          <option value="Phi-3.5-mini-instruct-q4f16_1-MLC">Phi-3.5 mini (~2,5 Go)</option>
+          <option value="Qwen2.5-7B-Instruct-q4f16_1-MLC">Qwen2.5 7B · GPU puissant (~5 Go)</option>
+        </select>
+      </label>
+      <button id="loadBtn">Charger l'IA</button>
+    </div>
+    <div class="status" id="aiStatus" style="margin-top:8px">L'IA open source se télécharge une fois puis reste en cache. Tout est calculé sur votre ordinateur.</div>
+    <div class="bar"><div id="aiBar"></div></div>
+    <div id="gpuWarn" class="note err hidden">WebGPU indisponible : l'IA ne peut pas tourner ici, le mode rapide est utilisé (Chrome ou Edge récent recommandé).</div>
+  </details>
 </main>
-<footer>POC - IA open source (Qwen2.5 / Llama 3.2 / Phi-3.5) via WebLLM (WebGPU) · mode rapide sans IA · reconnaissance vocale du navigateur · PDF généré avec jsPDF · liste de prix du cabinet (EUR)</footer>
+<footer>Prix issus de la liste du cabinet (EUR) · IA open source via WebLLM · PDF généré dans le navigateur</footer>
 
 <script>
 const CATALOG = [["1.36.", "Restorative dentistry (treatment)", "Single-use hygiene kit", 3.19], ["1.25.", "Restorative dentistry (treatment)", "Core build-up of a molar for a prosthetic restoration", 23.89], ["1.26.", "Restorative dentistry (treatment)", "Core build-up of an anterior tooth for a prosthetic restoration", 30.86], ["1.28.", "Restorative dentistry (treatment)", "Additional glass-fibre post", 8.36], ["1.31.", "Restorative dentistry (treatment)", "Internal tooth bleaching", 34.85], ["1.3.", "Restorative dentistry (treatment)", "Local anaesthesia", 4.18], ["1.29.", "Restorative dentistry (treatment)", "Removal of a metal crown", 6.17], ["1.30.", "Restorative dentistry (treatment)", "Removal of a metal-ceramic / cast crown", 8.56], ["1.4.", "Restorative dentistry (treatment)", "Rubber dam placement", 4.18], ["1.6.", "Restorative dentistry (treatment)", "Placement of devitalising paste", 12.35], ["1.8.", "Restorative dentistry (treatment)", "Fluoride varnish application, 1 tooth", 4.18], ["1.7.", "Restorative dentistry (treatment)", "Fluoride varnish application, 1 segment (6 teeth)", 8.36], ["1.2.", "Restorative dentistry (treatment)", "Extended consultation", 9.36], ["1.5.", "Restorative dentistry (treatment)", "Dental radiograph", 4.18], ["1.9.", "Restorative dentistry (treatment)", "Restoration of a molar, 1 surface", 29.87], ["1.10.", "Restorative dentistry (treatment)", "Restoration of a single-surface molar", 39.03], ["1.11.", "Restorative dentistry (treatment)", "Restoration of a two-surface molar", 49.38], ["1.12.", "Restorative dentistry (treatment)", "Restoration of an anterior tooth, 1 surface", 34.85], ["1.13.", "Restorative dentistry (treatment)", "Restoration of a single-surface anterior tooth", 45.2], ["C1-20", "Restorative dentistry (treatment)", "Two-surface restoration of an anterior tooth", 57.74], ["1.27.", "Restorative dentistry (treatment)", "Glass-fibre post cementation", 12.35], ["C1-22", "Restorative dentistry (treatment)", "Core build-up for a prosthetic restoration with a deep subgingival defect", 30.86], ["C1-23", "Restorative dentistry (treatment)", "Additional local anaesthetic cartridge", 2.19], ["C1-24", "Restorative dentistry (treatment)", "Temporary build-up", 10.35], ["C1-25", "Restorative dentistry (treatment)", "Aesthetic restoration", 67.7], ["C1-26", "Restorative dentistry (treatment)", "Bonding of onlay + bar", 16.53], ["C1-27", "Restorative dentistry (treatment)", "Clinical photo documentation", 4.18], ["C1-28", "Restorative dentistry (treatment)", "Additional reinforcement of tooth walls with Ever X composite", 13.34], ["C1-29", "Restorative dentistry (treatment)", "Complex aesthetic restoration", 92.39], ["C1-30", "Restorative dentistry (treatment)", "Root canal disobturation", 47.19], ["C1-31", "Restorative dentistry (treatment)", "Pre-operative professional hygiene", 14.34], ["C1-32", "Restorative dentistry (treatment)", "Polishing of a restoration placed elsewhere", 11.95], ["C1-33", "Restorative dentistry (treatment)", "Biomodel fabrication (laboratory fee)", 35.04], ["2.8.", "Periodontics", "Periodontal consultation and initial periodontal charting", 16.53], ["C2-02", "Periodontics", "Single-use periodontal kit", 3.19], ["C2-03", "Periodontics", "Professional hygiene", 41.02], ["2.3.", "Periodontics", "Partial professional hygiene", 22.7], ["2.1.", "Periodontics", "Removal of dental deposits around one tooth", 4.18], ["C2-06", "Periodontics", "Splinting of one tooth", 7.17], ["2.6.", "Periodontics", "Splinting of a mobile tooth with composite", 9.36], ["C2-08", "Periodontics", "Local anaesthesia", 4.18], ["C2-09", "Periodontics", "Additional local anaesthetic cartridge", 2.19], ["2.7.", "Periodontics", "Excision of overgrown gingival tissue", 7.17], ["C2-11", "Periodontics", "Scaling", 162.08], ["C2-12", "Periodontics", "Repeat curettage", 22.7], ["C2-13", "Periodontics", "Soft-tissue augmentation (at implant placement or second-stage surgery)", 140.0], ["C2-14", "Periodontics", "Vestibuloplasty (3–6 teeth)", 260.0], ["C2-15", "Periodontics", "Treatment of a single gingival recession", 210.0], ["C2-16", "Periodontics", "Treatment of multiple gingival recessions (3–6 teeth)", 340.0], ["C2-17", "Periodontics", "Follow-up periodontal charting", 13.34], ["C2-18", "Periodontics", "Scaling and root planing (SRP), one tooth", 6.17], ["C2-19", "Periodontics", "Scaling and root planing (SRP), one jaw", 78.05], ["C2-20", "Periodontics", "Periodontal follow-up examination with charting, 3–6 months after treatment", 12.35], ["2.10.", "Periodontics", "Open curettage at one tooth, without bone grafting material", 14.34], ["2.12.", "Periodontics", "Irrigation of periodontal pocket with suppuration", 2.19], ["C2-23", "Periodontics", "Root canal disobturation", 47.19], ["C2-24", "Periodontics", "Partial pre-operative professional hygiene", 7.17], ["3.15.", "Endodontics", "Pulp amputation with MTA placement", 24.69], ["3.6.", "Endodontics", "Removal of an anchor post", 14.34], ["3.7.", "Endodontics", "Removal of a metal inlay", 24.69], ["3.20.", "Endodontics", "Endodontic re-treatment (incisors and canines)", 69.69], ["3.21.", "Endodontics", "Endodontic re-treatment (premolars)", 89.6], ["3.22.", "Endodontics", "Endodontic re-treatment (molars)", 109.51], ["3.12.", "Endodontics", "Removal of a separated instrument from the root canal", 51.37], ["3.14.", "Endodontics", "Perforation repair with MTA", 20.51], ["3.1.", "Endodontics", "Local anaesthesia", 4.18], ["3.16.", "Endodontics", "Root canal treatment — anterior teeth (incisors and canines)", 49.78], ["3.17.", "Endodontics", "Root canal treatment — premolars", 69.69], ["3.18.", "Endodontics", "Root canal treatment — molars", 89.6], ["3.2.", "Endodontics", "Placement of devitalising paste", 10.35], ["3.9.", "Endodontics", "Root canal filling with calcium-based paste", 13.34], ["3.8.", "Endodontics", "MTA pulp capping for an exposed pulp horn", 20.51], ["3.10.", "Endodontics", "Tooth revision", 7.17], ["3.11.", "Endodontics", "Root canal revision", 10.35], ["C3-18", "Endodontics", "Apexification of immature roots", 67.7], ["C3-19", "Endodontics", "Rubber dam placement", 4.18], ["C3-20", "Endodontics", "Single-use hygiene kit", 3.19], ["C3-21", "Endodontics", "Additional local anaesthetic carpule", 2.19], ["C3-22", "Endodontics", "Filling of one root canal with MTA", 10.35], ["C3-23", "Endodontics", "ICON treatment for one tooth", 28.87], ["C3-24", "Endodontics", "Complex endodontic treatment with bioceramic material", 153.92], ["C3-25", "Endodontics", "Root canal treatment with bioceramic material (incisor)", 88.21], ["5.6.", "Surgery", "Socket preservation with Colacone for delayed implant placement", 11.35], ["5.9.", "Surgery", "Excision of the operculum over a wisdom tooth", 14.34], ["5.8", "Surgery", "Blood collection and PRF membrane preparation before surgery", 12.35], ["5.7.", "Surgery", "Blood collection and PRF membrane preparation before extraction (1–2 teeth)", 9.96], ["C4-05", "Surgery", "Blood collection and PRF membrane preparation before extraction (3–4 teeth)", 10.35], ["5.14.", "Surgery", "Gingival recession coverage for one tooth", 160.0], ["5.1.", "Surgery", "Conventional tooth extraction with socket suturing and antimicrobial sponge placement", 16.53], ["5.13.", "Surgery", "Frenectomy", 41.02], ["5.10.", "Surgery", "Incision for periostitis", 15.53], ["5.2.", "Surgery", "Extraction of a wisdom tooth (Grade 1 complexity), with socket suturing and antimicrobial sponge placement", 82.04], ["C4-11", "Surgery", "Extraction of a wisdom tooth (Grade 2 complexity)", 102.54], ["C4-12", "Surgery", "Complex tooth extraction with socket suturing and antimicrobial sponge placement", 20.51], ["C4-13", "Surgery", "Extraction of a wisdom tooth adjacent to anatomical structures", 205.09], ["C4-14", "Surgery", "Removal of a retention cyst", 37.04], ["C4-15", "Surgery", "Removal of an impacted tooth", 92.39], ["C4-16", "Surgery", "Histopathological examination", 20.51], ["C4-17", "Surgery", "Local anaesthesia", 4.18], ["C4-18", "Surgery", "Surgical exposure of canines", 37.04], ["C4-19", "Surgery", "Crown lengthening", 6.17], ["C4-20", "Surgery", "Collagen wedge placement", 10.35], ["C4-21", "Surgery", "Single-use hygiene kit", 3.19], ["C4-22", "Surgery", "Additional local anaesthetic cartridge", 2.19], ["C4-23", "Surgery", "Removal of wisdom tooth buds", 92.39], ["C4-24", "Surgery", "Fabrication of a protective palatal splint", 24.69], ["C4-25", "Surgery", "Excision of an epulis", 86.22], ["C4-26", "Surgery", "Retrograde filling of one root canal", 49.38], ["C4-27", "Surgery", "Membrane placement", 120.0], ["C4-28", "Surgery", "Implant removal", 60.0], ["C4-29", "Surgery", "Apical microsurgery of an anterior tooth with retrograde MTA filling", 310.0], ["C4-30", "Surgery", "Apical microsurgery of a posterior tooth with retrograde MTA filling", 340.0], ["C4-31", "Surgery", "Sterilisation pack", 61.73], ["C4-32", "Surgery", "Tooth extraction and socket preservation", 60.0], ["C5-01", "Surgery (Dr. R.A.)", "Wisdom tooth extraction, Grade 1 difficulty, with socket suturing and antimicrobial sponge placement", 159.29], ["C5-02", "Surgery (Dr. R.A.)", "Wisdom tooth extraction, Grade 2 difficulty, with socket suturing and antimicrobial sponge placement", 199.12], ["6.1.", "Implantology", "Surgical guide for 1–2 implants", 80.0], ["6.37.", "Implantology", "Surgical guide for 3–4 implants", 120.0], ["6.38.", "Implantology", "Surgical guide for 5–6 implants", 160.0], ["6.23.", "Implantology", "Sealing the screw access channel in an implant crown", 14.34], ["C6-05", "Implantology", "Impressions of implants for temporary crowns", 10.35], ["C6-06", "Implantology", "Impressions of implants for permanent crowns", 18.52], ["C6-07", "Implantology", "Zirconia crown on Osstem implant", 360.0], ["C6-08", "Implantology", "Zirconia crown on Straumann implant", 450.0], ["6.5.", "Implantology", "Osstem implant placement (Korea)", 460.0], ["6.6.", "Implantology", "Straumann BLT implant placement (Switzerland)", 830.0], ["6.7.", "Implantology", "Straumann SLAactive implant placement", 830.0], ["6.16.", "Implantology", "Healing abutment placement", 65.0], ["6.14.", "Implantology", "Gingival (soft-tissue) grafting around one tooth", 65.0], ["6.8.", "Implantology", "Bone grafting during placement of one implant", 260.0], ["6.30.", "Implantology", "Bone grafting during placement of multiple implants", 520.0], ["C6-16", "Implantology", "Pre-implant bone grafting at one implant site", 420.0], ["6.11.", "Implantology", "Pre-implant bone grafting at multiple implant sites", 830.0], ["6.12.", "Implantology", "Sinus lift before implant placement, one implant site", 530.0], ["C6-19", "Implantology", "Sinus lift before implant placement, two implant sites", 830.0], ["6.13.", "Implantology", "Sinus lift during implant placement, one implant", 330.0], ["C6-21", "Implantology", "Sinus lift during implant placement, 2–3 implants", 630.0], ["C6-22", "Implantology", "Bone grafting with lamina for 2–3 teeth", 1240.0], ["C6-23", "Implantology", "Bone grafting with lamina for 1–2 teeth", 830.0], ["C6-24", "Implantology", "Closed sinus lift", 160.0], ["6.22.", "Implantology", "Temporary crown on implant", 51.37], ["C6-26", "Implantology", "Metal-acrylic prosthesis on implants", 440.0], ["C6-27", "Implantology", "Acrylic denture on Locator attachments", 10.95], ["C6-28", "Implantology", "Gingival zenith correction for one tooth", 30.0], ["C6-29", "Implantology", "Temporary crown on abutment placed during surgery", 80.0], ["C6-30", "Implantology", "Custom healing abutment placement", 80.0], ["C6-31", "Implantology", "Gingival (soft-tissue) grafting around an implant", 65.0], ["C6-32", "Implantology", "Single-use surgical kit", 6.17], ["C6-33", "Implantology", "Additional local anaesthetic cartridge", 2.19], ["C6-34", "Implantology", "Mini-implant placement", 35.0], ["C6-35", "Implantology", "Multi-unit abutment placement", 60.0], ["C6-36", "Implantology", "Temporary prosthesis on abutments", 230.0], ["C6-37", "Implantology", "Zirconia prosthesis on All-on-4 implants", 2680.0], ["C6-38", "Implantology", "Zirconia prosthesis on All-on-6 implants", 2890.0], ["C6-39", "Implantology", "All-on-4 with Osstem implants", 3920.0], ["C6-40", "Implantology", "All-on-4 with Megagen implants", 3500.0], ["C6-41", "Implantology", "All-on-6 with Megagen implants", 4500.0], ["C6-42", "Implantology", "All-on-6 with Osstem implants", 4330.0], ["C6-43", "Implantology", "All-on-4 temporary prosthesis (immediate loading)", 830.0], ["C6-44", "Implantology", "All-on-4 temporary prosthesis (immediate loading with bar)", 980.0], ["C6-45", "Implantology", "All-on-6 temporary prosthesis (immediate loading)", 930.0], ["C6-46", "Implantology", "All-on-6 with Straumann BLX implants", 6180.0], ["C6-47", "Implantology", "IDR implant placement in the central incisor region with Megagen Korean implant system (guide, implant, bone grafting, gingival grafting and temporary crown)", 1240.0], ["C6-48", "Implantology", "Bone grafting at the time of tooth extraction", 90.0], ["C6-49", "Implantology", "Megagen AnyOne implant placement", 470.0], ["C6-50", "Implantology", "Megagen ST implant placement", 360.0], ["C6-51", "Implantology", "Megagen implant placement", 570.0], ["C6-52", "Implantology", "Megagen AnyRidge implant placement", 570.0], ["C6-53", "Implantology", "Zirconia implant placement", 1140.0], ["C6-54", "Implantology", "All-on-6 FP1 with Megagen implants", 4950.0], ["C6-55", "Implantology", "All-on-6 FP1 with Straumann BLX implants", 6800.0], ["C6-56", "Implantology", "Nobel implant placement", 830.0], ["C6-57", "Implantology", "Osstem SOI implant placement", 520.0], ["C6-58", "Implantology", "All-on-6 with Nobel implants", 7000.0], ["C6-59", "Implantology", "All-on-4 with Nobel implants", 5500.0], ["C6-60", "Implantology", "IDR implant placement in the central incisor region with Nobel Swiss implant system (guide, implant, bone grafting, gingival grafting and temporary crown)", 1750.0], ["C6-61", "Implantology", "Multi-unit abutment cost", 110.0], ["C6-62", "Implantology", "Sinus lift before placement of 3 implants", 1030.0], ["C6-63", "Implantology", "Sinus lift before placement of 4 implants", 1230.0], ["C6-64", "Implantology", "Sinus lift during placement of 4 implants", 830.0], ["C6-65", "Implantology", "Bone grafting with lamina during implant placement for 1–2 teeth", 400.0], ["C6-66", "Implantology", "Bone grafting with lamina during implant placement for 3–4 teeth", 600.0], ["C7-01", "Implant prosthetics", "Fabrication of a custom model", 20.51], ["C7-02", "Implant prosthetics", "ML zirconia crown on Osstem implant", 360.0], ["C7-03", "Implant prosthetics", "ML zirconia crown on Straumann implant", 450.0], ["C7-04", "Implant prosthetics", "ML zirconia crown on Megagen implant", 360.0], ["6.22", "Implant prosthetics", "Temporary crown on implant", 50.97], ["C7-06", "Implant prosthetics", "Immediate temporary crown on abutment (at surgery)", 80.0], ["C7-07", "Implant prosthetics", "Zirconia custom abutment placement", 70.0], ["C7-08", "Implant prosthetics", "Titanium custom abutment", 70.0], ["C7-09", "Implant prosthetics", "Temporary composite crown on implant", 37.04], ["C7-10", "Implant prosthetics", "Osstem abutment placement", 30.76], ["C7-11", "Implant prosthetics", "Megagen abutment placement", 41.02], ["C7-12", "Implant prosthetics", "Straumann abutment placement", 61.53], ["C7-13", "Implant prosthetics", "ST zirconia crown on Megagen implant", 310.0], ["C7-14", "Implant prosthetics", "ST zirconia crown on Straumann implant", 340.0], ["C7-15", "Implant prosthetics", "ST zirconia crown on Osstem implant", 310.0], ["C7-16", "Implant prosthetics", "Neodent abutment placement", 41.02], ["C7-17", "Implant prosthetics", "ML zirconia crown on Nobel implant", 520.0], ["C7-18", "Implant prosthetics", "Implant scan for crown fabrication", 10.35], ["C7-19", "Implant prosthetics", "Nobel abutment placement", 110.0], ["C7-20", "Implant prosthetics", "Immediate temporary crown on Nobel abutment (at surgery)", 150.0], ["C7-21", "Implant prosthetics", "Immediate temporary crown on Straumann abutment (at surgery)", 150.0], ["C8-01", "Sedation with anaesthesiologist – adults", "Sedation – first hour", 179.2], ["C8-02", "Sedation with anaesthesiologist – adults", "Sedation – each additional hour", 79.65], ["C8-03", "Sedation with anaesthesiologist – adults", "Sedation – each additional 30 minutes", 39.82], ["C8-04", "Sedation with anaesthesiologist – adults", "Anaesthesiologist support – first hour", 99.56], ["C8-05", "Sedation with anaesthesiologist – adults", "Anaesthesiologist support – each additional hour", 59.73]].map(([code, category, label, price]) => ({ code, category, label, price }));
@@ -809,7 +833,7 @@ function render() {
   const plan = state.plans.at(-1), i = state.plans.length - 1, T = L[plan.lang || "fr"];
   const hasDisc = plan.stages.some(s => s.items.some(it => it.discount));
   $("planCard").classList.remove("hidden");
-  $("planVersion").textContent = "version " + plan.version + (plan.mode === "ai" ? " · IA" : " · mode rapide");
+  $("planVersion").textContent = "· version " + plan.version;
   let h = `<div><b>${T.patient} :</b> ${esc(plan.patient)}</div>`;
   if (plan.summary) h += `<p style="margin:6px 0">${esc(plan.summary)}</p>`;
   for (const s of plan.stages) {
