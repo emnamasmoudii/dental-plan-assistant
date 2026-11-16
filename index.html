@@ -67,8 +67,8 @@
   <section class="card">
     <h2>🧠 Moteur</h2>
     <div class="settings" style="margin-bottom:10px">
-      <label><input type="radio" name="mode" value="ai" checked> IA open source dans le navigateur (Qwen, Llama, Phi)</label>
-      <label><input type="radio" name="mode" value="rules"> Mode rapide sans IA (instantané)</label>
+      <label><input type="radio" name="mode" value="rules" checked> Mode rapide (instantané, notes en anglais ou en français)</label>
+      <label><input type="radio" name="mode" value="ai"> IA open source dans le navigateur (Qwen, Llama, Phi)</label>
     </div>
     <div class="settings">
       <label>Modèle :
@@ -95,7 +95,8 @@
     <textarea id="dictation" placeholder="Cliquez sur « Dicter » et parlez, ou tapez les notes du dentiste ici..."></textarea>
     <div class="row">
       <button id="micBtn">🎤 Dicter</button>
-      <button id="exampleBtn">Insérer un exemple</button>
+      <button id="exampleBtn">Exemple (FR)</button>
+      <button id="exampleEnBtn">Example (EN notes)</button>
       <button id="genBtn" class="primary" disabled>Générer le plan de traitement</button>
       <span class="status" id="micStatus"></span>
     </div>
@@ -136,6 +137,20 @@ import * as webllm from "https://esm.run/@mlc-ai/web-llm@0.2.88";
 
 const $ = (id) => document.getElementById(id);
 const state = { engine: null, loading: null, plans: [], pdfs: [], raws: [], answers: {}, dictation: "" };
+const EXAMPLE_EN = `PATIENT 1
+Stage 1
+• SRP (scaling and root planing), 1 segment
+• Pre-operative hygiene, with discount
+• Sinus lift during implant placement, 2–3 implants
+• Implants at sites 45, 35, 37
+• Bone grafting during implant placement, around one implant – free of charge under the "Doluchys" programme
+• 1 sterilisation pack
+• Sedation, 4 h / without sedation
+
+Stage 2 – after 3 months
+• Healing abutments on 3 implants + gingival grafting around 3 implants + 3 x local anaesthesia + 1 single-use hygiene kit
+• Scan of 3 implants
+• Temporary crowns on 4 implants + model + single-use hygiene kit`;
 const EXAMPLE = "Patiente de 45 ans. Détartrage complet avant tout. Extraction de la 38 incluse, difficulté grade 2. " +
   "Implant en 36 dans trois mois avec couronne zircone sur implant. Contrôle parodontal six mois après.";
 
@@ -162,6 +177,7 @@ $("micBtn").onclick = () => {
   $("micStatus").textContent = "Parlez... le texte apparaît en direct.";
 };
 $("exampleBtn").onclick = () => { $("dictation").value = EXAMPLE; refreshGen(); };
+$("exampleEnBtn").onclick = () => { $("dictation").value = EXAMPLE_EN; refreshGen(); };
 $("dictation").oninput = refreshGen;
 function refreshGen() { $("genBtn").disabled = !$("dictation").value.trim(); }
 
@@ -193,16 +209,19 @@ function findCode(code, label) {
 // Plan "brut" (codes + quantités) -> plan complet avec libellés, prix et totaux tirés de la liste
 const num = (x, d = 0) => { const n = parseFloat(String(x ?? "").replace(",", ".").replace(/[^\d.\-]/g, "")); return isNaN(n) ? d : n; };
 function buildPlan(raw, mode) {
+  const lang = raw.lang === "en" || raw.lang === "fr" ? raw.lang : detectLang(state.dictation);
   const assumptions = (raw.assumptions || []).map(String);
   let total = 0;
   const stages = (raw.stages || []).map(s => {
     const items = [];
     for (const it of s.items || []) {
       const ref = findCode(it.code, it.label);
-      if (!ref) { assumptions.push(`Acte « ${it.label || it.code} » absent de la liste : non chiffré.`); continue; }
+      if (!ref) { assumptions.push(`« ${it.label || it.code} » : ${L[lang].notPriced}.`); continue; }
       const qty = Math.max(1, num(it.qty, 1));
-      items.push({ code: ref.code, label: ref.label, tooth: String(it.tooth ?? ""), qty,
-                   unit_price: ref.price, subtotal: Math.round(qty * ref.price * 100) / 100 });
+      const unit = it.price !== undefined && it.price !== null && !isNaN(num(it.price, NaN)) ? num(it.price) : ref.price;
+      const discount = Math.min(100, Math.max(0, num(it.discount, 0)));
+      items.push({ code: ref.code, label: it.label && it.price !== undefined ? String(it.label) : ref.label, tooth: String(it.tooth ?? ""), qty,
+                   unit_price: unit, discount, subtotal: Math.round(qty * unit * (1 - discount / 100) * 100) / 100 });
     }
     const stage_total = Math.round(items.reduce((a, b) => a + b.subtotal, 0) * 100) / 100;
     total += stage_total;
@@ -212,7 +231,7 @@ function buildPlan(raw, mode) {
     id: String(q.id ?? "q" + (i + 1)), question: String(q.question), options: (q.options || []).map(String).slice(0, 5),
   }));
   return { patient: String(raw.patient || "Non précisé"), summary: String(raw.summary || ""), stages,
-           total: Math.round(total * 100) / 100, assumptions, questions, mode };
+           total: Math.round(total * 100) / 100, assumptions, questions, mode, lang };
 }
 
 // ---------------------------------------------------------------- Mode IA (Qwen2.5 via WebLLM)
@@ -234,7 +253,9 @@ RÈGLES :
 - Ajoute l'anesthésie locale pour les actes chirurgicaux.
 - "interval" = délai de l'étape : "Semaine 0", "Semaine 1", "+3 mois", "+6 mois"...
 - Pose 1 à 4 questions (2 à 5 options courtes chacune) quand un choix change le prix : marque d'implant (Osstem, Megagen, Straumann, Nobel), couronne ST ou ML, difficulté de dent de sagesse, sédation. Si tout est clair : "questions":[].
-- Note tes choix par défaut dans "assumptions". Textes en français.
+- Si le dentiste donne une remise (ex. -30 %, gratuit = 100 %), ajoute "discount": pourcentage sur l'acte ; s'il donne un prix précis, ajoute "price".
+- Note tes choix par défaut dans "assumptions".
+- IMPORTANT : écris name, interval, summary, assumptions et questions DANS LA MÊME LANGUE QUE LA DICTÉE (anglais si la dictée est en anglais). Respecte les étapes (Stage) données par le dentiste.
 - Réponds UNIQUEMENT avec un objet JSON valide, exactement dans ce format :
 ${JSON_FORMAT}
 
@@ -432,6 +453,257 @@ function rulesPlan(text, ans = {}) {
   };
 }
 
+// ---------------------------------------------------------------- Langue
+function detectLang(text) {
+  const t = " " + norm(text) + " ";
+  const en = (t.match(/\b(the|and|with|after|stage|implants?|crowns?|sites?|scan|placement|free of charge|healing)\b/g) || []).length;
+  const fr = (t.match(/\b(le|la|les|des|avec|apres|etape|dent|couronne|mois|dans|puis|une?)\b/g) || []).length;
+  return en > fr ? "en" : "fr";
+}
+const L = {
+  fr: { stage: "Étape", start: "Début", code: "Code", act: "Acte", tooth: "Dent", qty: "Qté", unit: "Prix unit.", disc: "Remise",
+        sub: "Sous-total", stageTotal: "Total de l'étape", total: "TOTAL DU PLAN DE TRAITEMENT", hyp: "Hypothèses",
+        toConfirm: "Points à confirmer", patient: "Patient", version: "Version", date: "Date", title: "Cabinet dentaire - Plan de traitement",
+        free: "Gratuit", footer: "Devis indicatif", notPriced: "non chiffré", other: "Autre…", otherPh: "Votre réponse (si « Autre »)",
+        noQ: "Aucune question : le plan est complet.", regen: "Régénérer le PDF avec mes réponses", dl: "📄 Télécharger le PDF" },
+  en: { stage: "Stage", start: "Start", code: "Code", act: "Procedure", tooth: "Tooth", qty: "Qty", unit: "Unit price", disc: "Discount",
+        sub: "Subtotal", stageTotal: "Stage total", total: "TREATMENT PLAN TOTAL", hyp: "Assumptions",
+        toConfirm: "Points to confirm", patient: "Patient", version: "Version", date: "Date", title: "Dental clinic - Treatment plan",
+        free: "Free", footer: "Indicative estimate", notPriced: "not priced", other: "Other…", otherPh: "Your answer (if “Other”)",
+        noQ: "No questions: the plan is complete.", regen: "Regenerate the PDF with my answers", dl: "📄 Download the PDF" },
+};
+
+// ---------------------------------------------------------------- Analyse de notes structurées (anglais ou français)
+const WN = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+             un: 1, une: 1, deux: 2, trois: 3, quatre: 4, cinq: 5, sept: 7, huit: 8, neuf: 9, dix: 10 };
+const toN = (x) => WN[x] ?? parseInt(x, 10);
+const NUMRE = "(\\d+|one|two|three|four|five|six|seven|eight|nine|ten|un|une|deux|trois|quatre|cinq|sept|huit|neuf|dix)";
+const teethOf = (s) => [...s.matchAll(/\b([1-4][1-8])\b/g)].map(m => m[1]);
+const nBefore = (s, word) => { const m = s.match(new RegExp(NUMRE + "\\s*(x\\s*)?(" + word + ")")); return m ? toN(m[1]) : null; };
+const nOnImplants = (s) => { const m = s.match(new RegExp("(?:on|around|of|sur|autour de)\\s+" + NUMRE + "\\s+implants?")); return m ? toN(m[1]) : null; };
+const money = (x) => parseFloat(String(x).replace(/[\s,]/g, ""));
+
+function notesPlan(text, ans = {}) {
+  const lang = detectLang(text), T = L[lang], en = lang === "en";
+  const tr = (e, f) => (en ? e : f);
+  const raw = norm(text).replace(/\r/g, "").replace(/\n(?=[a-z0-9(])/g, " ");
+  // Découpage : une ligne par puce / phrase ; nouvelle étape sur "Stage N", "Étape N", "after N months:", "1st visit"
+  const lines = raw.replace(/(?<!in |dans l'|a l')(stage|etape)\s*(\d+)/g, "\n$1 $2").replace(/•\s*/g, "\n")
+    .split(/\n|(?<=[a-z)])\.\s+|;/).map(s => s.trim()).filter(Boolean);
+  const stages = [], questions = [], assumptions = [];
+  const ask = (q) => { if (!questions.some(x => x.id === q.id)) questions.push(q); };
+  let cur = null, implantsSoFar = 0;
+  const topicOf = (s) => ["implant", "temporar", "bone"].filter(k => s.includes(k) || (k === "bone" && /augmentation|graft/.test(s)));
+  const newStage = (label, interval, hdr = "") => { cur = { name: label, interval, items: [], topics: topicOf(hdr) }; stages.push(cur); };
+  const IMPL = Object.values(BRANDS).map(b => b.implant);
+  const itemTopic = (c) => IMPL.includes(c) ? "implant" : c === "6.22." ? "temporar" : ["C6-22", "C6-23", "6.8.", "6.30."].includes(c) ? "bone" : null;
+  const add = (item) => {
+    if (!cur) newStage("", T.start);
+    const tp = itemTopic(item.code), target = (tp && !cur.topics.includes(tp) && stages.find(st => st.topics.includes(tp))) || cur;
+    target.items.push({ qty: 1, tooth: "", ...item });
+  };
+
+  // Remise globale (ex. militaire -30 %)
+  const gm = raw.match(/\(\s*[-−]\s*(\d+)\s*%\s*\)|[-−]\s*(\d+)\s*%/);
+  const globalPct = gm ? +(gm[1] || gm[2]) : 0;
+  if (globalPct && !ans.gdisc) {
+    ask({ id: "gdisc", question: tr(`A ${globalPct}% discount is mentioned. How should it be applied?`, `Une remise de ${globalPct} % est mentionnée. Comment l'appliquer ?`),
+          options: [tr(`To the whole estimate`, `À tout le devis`), tr(`Only to the items marked with a discount`, `Uniquement aux actes indiqués`), tr("No discount", "Pas de remise")] });
+  }
+  // Marque d'implant
+  const brandNames = Object.keys(BRANDS);
+  let brand = ans.brand || brandNames.find(b => raw.includes(norm(b)));
+  const needBrand = () => {
+    if (brand) return BRANDS[brand];
+    ask({ id: "brand", question: tr("Which implant system should be used?", "Quel système d'implant utiliser ?"), options: brandNames });
+    assumptions.push(tr("Megagen implants assumed (to be confirmed).", "Implants Megagen supposés (à confirmer)."));
+    brand = "Megagen"; return BRANDS[brand];
+  };
+  // Prix d'implant / de couronne dictés par le dentiste
+  const implantPrices = [...new Set([...raw.matchAll(/(\d[\d,]*)\s*eur\s*(?:per|par)\s*implant|implants?\s*(?:at|a)?\s*(\d[\d,]*)\s*eur(?:\s*(?:and|et)\s*(\d[\d,]*)\s*eur)?/g)]
+    .flatMap(m => [m[1], m[2], m[3]]).filter(Boolean).map(money))];
+  const explicitSites = /implants?\s+(?:at|in|en|aux?)\s+sites?|sites?\s+[1-4][1-8]|implants?\s+(?:at|in)\s+[1-4][1-8]/.test(raw);
+  const siteTeethCount = raw.split("\n").filter(l => /implant/.test(l) && /sites?/.test(l)).reduce((a, l) => a + teethOf(l).length, 0);
+  const graftRange = /(bone graft|greffe osseuse)[^\n]*\d[\d,]*\s*[–-]\s*\d[\d,]*\s*eur/.test(raw);
+  const implDisc = /discount on the implants|remise sur les implants/.test(raw);
+  if (implDisc && !ans.implDisc) {
+    ask({ id: "implDisc", question: tr("A discount on the implants is planned: which percentage?", "Une remise sur les implants est prévue : quel pourcentage ?"), options: ["5%", "10%", "15%", "20%"] });
+    assumptions.push(tr("Implant discount not applied until confirmed.", "Remise sur les implants non appliquée tant qu'elle n'est pas confirmée."));
+  }
+  const listChosen = ans.implantPrice === "list";
+  let implantPrice = (ans.implantPrice !== undefined && !listChosen) ? ans.implantPrice : null;
+  if (implantPrice === null && !listChosen && implantPrices.length === 1) implantPrice = implantPrices[0];
+  if (implantPrice === null && !listChosen && implantPrices.length > 1) {
+    ask({ id: "implantPrice", question: tr(`Several implant prices are mentioned (${implantPrices.join(" / ")} EUR). Which one applies?`,
+                                            `Plusieurs prix d'implant sont cités (${implantPrices.join(" / ")} EUR). Lequel appliquer ?`),
+          options: [...implantPrices.map(p => p + " EUR"), tr("Price list", "Prix de la liste")] });
+    implantPrice = implantPrices[0];
+    assumptions.push(tr(`Implant price of ${implantPrice} EUR assumed.`, `Prix d'implant de ${implantPrice} EUR supposé.`));
+  }
+  const cm = raw.match(/(\d[\d,]*)\s*eur\s*(?:per|par)\s*(crown|couronne)/);
+  const crownPrice = cm ? money(cm[1]) : null;
+  let crownType = ans.crown || (/\bml\b|multi.?layer|multicouche/.test(raw) ? "ML" : /\bst\b|monolithic|monolithique/.test(raw) ? "ST" : null);
+  const needCrownType = () => {
+    if (crownType) return crownType;
+    ask({ id: "crown", question: tr("Which zirconia crown type: ST (monolithic) or ML (multi-layer, more aesthetic)?", "Quel type de couronne zircone : ST (monolithique) ou ML (multicouche) ?"),
+          options: ["ST", "ML"] });
+    assumptions.push(tr("ML zirconia crowns assumed.", "Couronnes zircone ML supposées.")); return (crownType = "ML");
+  };
+
+  lines.forEach((s, li) => {
+    s = s.replace(/^[•*\-–]\s*/, "");
+    // En-têtes d'étape
+    const sh = s.match(/^(stage|etape)\s*(\d+)\s*[:\-–]?\s*(.*)$/);
+    const after = s.match(/^(after|apres)\s+([\d–\-]+\s*(?:months?|mois|weeks?|semaines?))/);
+    const visit = s.match(/^(\d+)(st|nd|rd|th|er|e)\s*visit/);
+    if (sh) {
+      const rest = sh[3] || "";
+      const iv = rest.match(/(?:after|apres)\s+[\d–\-]+\s*(?:months?|mois|weeks?|semaines?)/);
+      newStage("", iv ? iv[0] : (stages.length ? "" : T.start)); cur.kind = "stage";
+      s = rest; if (!s || iv && s.trim() === iv[0]) return;
+    } else if (after) {
+      if (cur && !cur.items.length && cur.kind === "stage") { cur.interval = after[0]; cur.topics.push(...topicOf(s)); } else newStage("", after[0], s);
+    } else if (visit) {
+      newStage("", visit[0], s);
+    }
+    const inSt = s.match(/\b(?:in|dans l'|a l')\s*(?:stage|etape)\s*(\d+)/);
+    if (inSt) { const st = stages.filter(x => x.kind === "stage")[+inSt[1] - 1]; if (st) cur = st; }
+    const free = /free of charge|gratuit|offert/.test(s);
+    const pm = s.match(/with (?:a )?(\d+)\s*% discount|(\d+)\s*% discount|remise de (\d+)\s*%/);
+    let pct = free ? 100 : pm ? +(pm[1] || pm[2] || pm[3]) : 0;
+    const vagueDiscount = !pct && /with discount|avec remise/.test(s);
+    const teeth = teethOf(s.replace(/segment\s*\d/g, "").replace(/\d+\s*(h|eur|%|months?|mois|days?|jours?)/g, ""));
+    const lineItems = [];
+    const push = (it) => lineItems.push(it);
+
+    if (/\bsrp\b|scaling and root planing|surfacage/.test(s)) {
+      push({ code: "C2-19", qty: nBefore(s, "segments?|jaws?|machoires?") || 1 });
+      assumptions.push(tr("SRP per segment billed as “SRP, one jaw”.", "SRP par segment facturé comme « SRP, une mâchoire »."));
+    }
+    if (/hygiene|detartrage|nettoyage/.test(s.replace(/single.use hygiene kit|hygiene kit|kit d'hygiene/g, ""))) {
+      push({ code: /pre.?op/.test(s) ? "C1-31" : "C2-03", key: "hyg" + li });
+    }
+    if (/sinus/.test(s) && /lamina|bone shell/.test(s) && /\bor\b|\bou\b/.test(s)) {
+      if (!ans.tech) ask({ id: "tech", question: tr("Which technique: lamina (bone shell) or sinus lift?", "Quelle technique : lamina (coque osseuse) ou sinus lift ?"),
+                           options: [tr("Lamina technique", "Technique lamina"), "Sinus lift"] });
+      if (ans.tech && /lamina/i.test(ans.tech)) push({ code: "C6-23" }); else push({ code: "6.13." });
+      if (!ans.tech) assumptions.push(tr("Sinus lift assumed (lamina technique possible).", "Sinus lift supposé (technique lamina possible)."));
+    } else if (/sinus/.test(s)) {
+      const n = nOnImplants(s) || (/2\s*[–-]\s*3/.test(s) ? 2 : nBefore(s, "implants?") || 1);
+      const during = !/before|avant/.test(s);
+      push({ code: during ? (n >= 4 ? "C6-64" : n >= 2 ? "C6-21" : "6.13.") : (n >= 4 ? "C6-63" : n === 3 ? "C6-62" : n === 2 ? "C6-19" : "6.12.") });
+    }
+    const isImplantPlacement = /implant/.test(s) && !/sinus|healing|cicatrisation|scan|crown|couronne|graft|greffe|abutment|pilier|temporar|remove|retrait/.test(s);
+    if (isImplantPlacement && (teeth.length || (!explicitSites && (/placement|place|pose|per side|par cote/.test(s) || nBefore(s, "implants?"))))) {
+      const b = needBrand();
+      const nn = (nBefore(s, "implants?") || 1) * (/per side|par cote/.test(s) ? 2 : 1);
+      const list = teeth.length ? teeth : Array(nn).fill("");
+      const d = implDisc && ans.implDisc ? parseInt(ans.implDisc, 10) : 0;
+      list.forEach(t => push({ code: b.implant, tooth: t, price: implantPrice ?? undefined, discount: d || undefined }));
+      implantsSoFar += list.length;
+    }
+    if (/bone graft|greffe osseuse|bone augmentation|augmentation osseuse/.test(s)) {
+      const pr = s.match(/(\d[\d,]*)\s*eur/), rng = s.match(/(\d[\d,]*)\s*[–-]\s*(\d[\d,]*)\s*eur/);
+      if (rng) {
+        const a = money(rng[1]), b2 = money(rng[2]);
+        const chosen = ans["graft" + li] ? money(ans["graft" + li]) : a;
+        if (!ans["graft" + li]) ask({ id: "graft" + li, question: tr(`Bone grafting price per side: ${a}–${b2} EUR. Which price?`, `Prix de la greffe osseuse par côté : ${a}–${b2} EUR. Lequel ?`),
+                                      options: [a + " EUR", Math.round((a + b2) / 2) + " EUR", b2 + " EUR"] });
+        const sides = /per side|par cote/.test(s) ? 2 : 1;
+        push({ code: "C6-22", label: tr("Bone grafting (price given by the dentist)", "Greffe osseuse (prix donné par le dentiste)"), price: chosen, qty: sides });
+        if (sides === 2) assumptions.push(tr("Bone grafting counted on 2 sides.", "Greffe osseuse comptée sur 2 côtés."));
+      } else if (pr) {
+        const seg = s.match(/segment\s*(\d)/);
+        push({ code: "C6-22", label: tr(`Bone grafting${seg ? ", segment " + seg[1] : ""}`, `Greffe osseuse${seg ? ", segment " + seg[1] : ""}`), price: money(pr[1]) });
+      } else if (graftRange) { /* le prix par côté est donné ailleurs */ }
+      else if (/around one|one implant|un implant/.test(s)) push({ code: "6.8." });
+      else push({ code: (nOnImplants(s) || 1) > 1 ? "6.30." : "6.8." });
+    }
+    if (/sterili[sz]ation pack|sachet de sterilisation|kit de sterilisation/.test(s)) push({ code: "C4-31", qty: nBefore(s, "sterili[sz]ation pack") || 1 });
+    if (/healing abutment|vis de cicatrisation|pilier de cicatrisation/.test(s)) push({ code: "6.16.", qty: nOnImplants(s) || teeth.length || 1 });
+    if (/gingival graft|greffe gingivale/.test(s)) {
+      const n = nOnImplants(s) || nBefore(s, "x\\s*gingival|gingival") || (/each implant|chaque implant/.test(s) ? implantsSoFar : null) || 1;
+      push({ code: "C6-31", qty: n });
+    }
+    if (/local anaesthesia|local anesthesia|anesthesie locale/.test(s)) push({ code: "C4-17", qty: nBefore(s, "x\\s*local|local") || 1 });
+    const kits = (s.match(/single.use hygiene kit|kit d'hygiene/g) || []).length;
+    if (kits) push({ code: "C4-21", qty: kits });
+    if (/\bscan\b/.test(s)) push({ code: "C7-18", qty: nOnImplants(s) || nBefore(s, "implants?") || 1 });
+    if (/temporar(y|ies)|provisoire/.test(s)) { const q = nOnImplants(s) || (/the implants|les implants/.test(s) ? implantsSoFar : null) || teeth.length || siteTeethCount; push({ code: "6.22.", qty: q || implantsSoFar || 1, autoQty: !q }); }
+    if (/\bmodels?\b|modele/.test(s)) push({ code: "C7-01", qty: nBefore(s, "models?") || 1 });
+    if (/zirconia crowns?|couronnes? (en )?zircone/.test(s)) {
+      const b = needBrand(), type = needCrownType();
+      { const q = nOnImplants(s) || teeth.length || siteTeethCount; push({ code: b[type], qty: q || implantsSoFar || 1, price: crownPrice ?? undefined, autoQty: !q }); }
+    }
+    if (/sealing|screw.access|scellement|cheminee/.test(s)) {
+      const lastCrowns = cur && [...cur.items, ...lineItems].filter(i => /zirconia crown/i.test(byCode[i.code]?.label || "")).reduce((a, i) => a + i.qty, 0);
+      push({ code: "6.23.", qty: lastCrowns || 1 });
+    }
+    if (/extract|extraction|extraire/.test(s) && !/need to be extracted|do not need|ne doivent pas/.test(s)) {
+      push({ code: "5.1.", qty: nBefore(s, "(front )?teeth|dents") || teeth.length || 1 });
+    }
+    if (/sedation|sedation|endormi/.test(s)) {
+      const hours = [...s.matchAll(/(\d+)\s*h\b/g)].map(m => +m[1]);
+      let h = ans.sedation !== undefined ? ans.sedation : null;
+      if (h === null) {
+        const opts = [...new Set([...hours.map(x => x + " h"), "1 h", "2 h"])];
+        ask({ id: "sedation", question: tr("Sedation for the surgery?", "Sédation pour la chirurgie ?"), options: [tr("No sedation", "Sans sédation"), ...opts] });
+        h = hours[0] || 1;
+        assumptions.push(tr(`Sedation of ${h} h assumed.`, `Sédation de ${h} h supposée.`));
+      }
+      if (h > 0) {
+        push({ code: "C8-01" }); push({ code: "C8-04" });
+        if (h > 1) { push({ code: "C8-02", qty: h - 1 }); push({ code: "C8-05", qty: h - 1 }); }
+      }
+    }
+    if (/reshape|grind|meulage|remodel/.test(s)) assumptions.push(tr(`“${s}”: not in the price list, not priced.`, `« ${s} » : absent de la liste, non chiffré.`));
+    if (/restorative|therapeutic|soins conservateurs/.test(s)) {
+      if (!ans.resto) ask({ id: "resto", question: tr("Restorative treatment: how many teeth need a filling?", "Soins conservateurs : combien de dents à soigner ?"), options: ["1", "2", "3", "4"] });
+      const n = +(ans.resto || 1);
+      push({ code: "C1-25", qty: n });
+    }
+
+    if (vagueDiscount && lineItems.length) {
+      const id = "disc" + li, name = byCode[lineItems[0].code]?.label || s;
+      if (!ans[id]) ask({ id, question: tr(`${cur ? "Stage " + (stages.filter(x => x.items.length || x === cur).indexOf(cur) + 1) + " – " : ""}“${name}” is “with discount”: which discount?`, `${cur ? "Étape " + (stages.filter(x => x.items.length || x === cur).indexOf(cur) + 1) + " – " : ""}« ${name} » est « avec remise » : quelle remise ?`), options: ["10%", "20%", "30%", "50%"] });
+      pct = ans[id] ? parseInt(ans[id], 10) : 0;
+      if (!ans[id]) assumptions.push(tr(`Discount on “${name}” not applied until confirmed.`, `Remise sur « ${name} » non appliquée tant qu'elle n'est pas confirmée.`));
+    }
+    if (free && lineItems.length) assumptions.push(tr(`Free of charge: ${lineItems.map(i => byCode[i.code]?.label).join(", ")} ("Doluchys" programme).`, `Gratuit : ${lineItems.map(i => byCode[i.code]?.label).join(", ")}.`));
+    lineItems.forEach(it => add({ ...it, discount: it.discount || pct, marked: (it.discount || pct) > 0 }));
+  });
+
+  stages.forEach(st => st.items.forEach(it => { if (it.autoQty && implantsSoFar) it.qty = implantsSoFar; }));
+  // Application de la remise globale
+  const g = ans.gdisc || "";
+  stages.forEach(st => st.items.forEach(it => {
+    if (globalPct && !it.discount && (/whole|tout/.test(norm(g)) || !g)) it.discount = globalPct;
+  }));
+  if (globalPct && !g) assumptions.push(tr(`${globalPct}% discount applied to the whole estimate (to be confirmed).`, `Remise de ${globalPct} % appliquée à tout le devis (à confirmer).`));
+  if (/no discount|pas de remise/.test(norm(g))) stages.forEach(st => st.items.forEach(it => { if (it.discount === globalPct && !it.marked) it.discount = 0; }));
+
+  const pm = text.match(/patient\s*\d+|patient(e)?\s+(de\s+)?\d+\s*ans/i);
+  return { lang, patient: pm ? pm[0] : tr("Not specified", "Non précisé"),
+           summary: tr("Estimate built from the dentist's notes and the clinic price list.", "Devis établi à partir des notes du dentiste et de la liste de prix du cabinet."),
+           stages: stages.filter(s => s.items.length).map((s, i) => ({ ...s, name: `${T.stage} ${i + 1}` })), assumptions, questions };
+}
+
+function fastPlan(text, s = {}) {
+  const useNotes = detectLang(text) === "en" || /(stage|etape)\s*\d/.test(norm(text));
+  const A = {};
+  if (s.brand) A.brand = Object.keys(BRANDS).find(b => norm(s.brand).includes(norm(b))) || "Megagen";
+  if (s.crown) A.crown = /^st/i.test(s.crown) ? "ST" : "ML";
+  if (!useNotes) {
+    if (s.wisdom) A.wisdom = ["Grade 1", "Grade 2", "Proche de structures anatomiques"].find(g => norm(s.wisdom).includes(norm(g))) || "Grade 2";
+    if (s.sedation) A.sedation = s.sedation;
+    return { ...rulesPlan(text, A), lang: "fr" };
+  }
+  for (const k of Object.keys(s)) if (/^(graft|disc)\d+$|^resto$|^gdisc$|^implDisc$|^tech$/.test(k)) A[k] = s[k];
+  if (s.sedation) A.sedation = /no|sans|non/i.test(s.sedation) ? 0 : (parseInt(s.sedation, 10) || 1);
+  if (s.implantPrice) A.implantPrice = /list|liste/i.test(s.implantPrice) ? "list" : money(s.implantPrice);
+  return notesPlan(text, A);
+}
+
 // ---------------------------------------------------------------- Génération
 const mode = () => document.querySelector("input[name=mode]:checked").value;
 function finalize(raw, version, m) {
@@ -445,7 +717,7 @@ function finalize(raw, version, m) {
 $("genBtn").onclick = async () => {
   state.dictation = $("dictation").value.trim();
   state.plans = []; state.pdfs = []; state.raws = []; state.answers = {};
-  if (mode() === "rules") { finalize(rulesPlan(state.dictation), 1, "rules"); $("genStatus").textContent = ""; return; }
+  if (mode() === "rules") { finalize(fastPlan(state.dictation), 1, "rules"); $("genStatus").textContent = ""; return; }
   busy(true, "genStatus", state.engine ? "L'IA construit le plan... (10 à 60 s)"
                                        : "Chargement de l'IA puis construction du plan... (la première fois : quelques minutes)");
   try {
@@ -454,7 +726,7 @@ $("genBtn").onclick = async () => {
     finalize(raw, 1, "ai");
     busy(false, "genStatus", "");
   } catch (e) {
-    finalize(rulesPlan(state.dictation), 1, "rules");
+    finalize(fastPlan(state.dictation), 1, "rules");
     busy(false, "genStatus", "");
     $("genStatus").innerHTML = `<div class="note warn">L'IA n'a pas abouti (${esc(e.message)}). Le plan a été généré en mode rapide.</div>`;
   }
@@ -474,7 +746,7 @@ $("regenBtn").onclick = async () => {
     return A;
   };
   if (plan.mode === "rules") {
-    finalize(rulesPlan(state.dictation, rulesAnswers()), v, "rules");
+    finalize(fastPlan(state.dictation, state.answers), v, "rules");
     $("regenStatus").textContent = "✅ PDF version " + v + " généré."; return;
   }
   busy(true, "regenStatus", "L'IA met à jour le plan...");
@@ -512,29 +784,32 @@ function collectAnswers(plan) {
 const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const eur = (x) => x.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, " ") + " EUR";
 function render() {
-  const plan = state.plans.at(-1), i = state.plans.length - 1;
+  const plan = state.plans.at(-1), i = state.plans.length - 1, T = L[plan.lang || "fr"];
+  const hasDisc = plan.stages.some(s => s.items.some(it => it.discount));
   $("planCard").classList.remove("hidden");
-  $("planVersion").textContent = "version " + plan.version + (plan.mode === "ai" ? " · généré par l'IA" : " · mode rapide");
-  let h = `<div><b>Patient :</b> ${esc(plan.patient)}</div>`;
+  $("planVersion").textContent = "version " + plan.version + (plan.mode === "ai" ? " · IA" : " · mode rapide");
+  let h = `<div><b>${T.patient} :</b> ${esc(plan.patient)}</div>`;
   if (plan.summary) h += `<p style="margin:6px 0">${esc(plan.summary)}</p>`;
   for (const s of plan.stages) {
     h += `<div class="stage-title">${esc(s.name)}${s.interval ? " · " + esc(s.interval) : ""}</div>
-      <table><colgroup><col style='width:62px'><col><col style='width:44px'><col style='width:40px'><col style='width:96px'></colgroup><tr><th>Code</th><th>Acte</th><th>Dent</th><th class="n">Qté</th><th class="n">Sous-total</th></tr>` +
-      s.items.map(it => `<tr><td>${esc(it.code)}</td><td>${esc(it.label)}</td><td>${esc(it.tooth)}</td><td class="n">${it.qty}</td><td class="n">${eur(it.subtotal)}</td></tr>`).join("") +
-      `<tr><td colspan="4" class="n"><b>Total de l'étape</b></td><td class="n"><b>${eur(s.stage_total)}</b></td></tr></table>`;
+      <table><colgroup><col style='width:58px'><col><col style='width:42px'><col style='width:36px'>${hasDisc ? "<col style='width:58px'>" : ""}<col style='width:92px'></colgroup>
+      <tr><th>${T.code}</th><th>${T.act}</th><th>${T.tooth}</th><th class="n">${T.qty}</th>${hasDisc ? `<th class="n">${T.disc}</th>` : ""}<th class="n">${T.sub}</th></tr>` +
+      s.items.map(it => `<tr><td>${esc(it.code)}</td><td>${esc(it.label)}</td><td>${esc(it.tooth)}</td><td class="n">${it.qty}</td>${hasDisc ? `<td class="n">${it.discount ? (it.discount === 100 ? T.free : "-" + it.discount + "%") : ""}</td>` : ""}<td class="n">${eur(it.subtotal)}</td></tr>`).join("") +
+      `<tr><td colspan="${hasDisc ? 5 : 4}" class="n"><b>${T.stageTotal}</b></td><td class="n"><b>${eur(s.stage_total)}</b></td></tr></table>`;
   }
   h += `<div class="total"><span>TOTAL</span><span>${eur(plan.total)}</span></div>`;
-  if (plan.assumptions.length) h += `<div class="note warn"><b>Hypothèses :</b><br>${plan.assumptions.map(esc).join("<br>")}</div>`;
+  if (plan.assumptions.length) h += `<div class="note warn"><b>${T.hyp} :</b><br>${plan.assumptions.map(esc).join("<br>")}</div>`;
   $("planView").innerHTML = h;
   $("pdfFrame").src = state.pdfs[i].url;
+  $("dlBtn").textContent = T.dl; $("regenBtn").textContent = T.regen;
 
   $("qCard").classList.remove("hidden");
   $("qList").innerHTML = plan.questions.length ? plan.questions.map((q, k) => `
     <div class="q"><p>${esc(q.question)}</p><div class="opts">
       ${q.options.map(o => `<label><input type="radio" name="q${k}" value="${esc(o)}">${esc(o)}</label>`).join("")}
-      <label><input type="radio" name="q${k}" value="__other">Autre…</label></div>
-      <input type="text" id="qo${k}" placeholder="Votre réponse (si « Autre »)"></div>`).join("")
-    : `<div class="note ok">Aucune question : le plan est complet.</div>`;
+      <label><input type="radio" name="q${k}" value="__other">${T.other}</label></div>
+      <input type="text" id="qo${k}" placeholder="${esc(T.otherPh)}"></div>`).join("")
+    : `<div class="note ok">${T.noQ}</div>`;
   $("regenBtn").classList.toggle("hidden", !plan.questions.length);
   $("versions").innerHTML = state.plans.length > 1
     ? "<div class='status' style='margin-top:12px'>Versions :</div>" + state.plans.map((p, k) =>
@@ -544,67 +819,72 @@ function render() {
   $("planCard").scrollIntoView({ behavior: "smooth" });
 }
 $("dlBtn").onclick = () => download(state.pdfs.length - 1);
-function download(k) { state.pdfs[k].doc.save(`plan_traitement_v${state.plans[k].version}.pdf`); }
+function download(k) { state.pdfs[k].doc.save(`treatment_plan_v${state.plans[k].version}.pdf`); }
 
 // ---------------------------------------------------------------- PDF (jsPDF)
 function pdfText(s) {
-  return String(s).replace(/[–—]/g, "-").replace(/[’‘]/g, "'").replace(/[“”]/g, '"').replace(/€/g, "EUR").replace(/…/g, "...");
+  return String(s).replace(/[“”«»]/g, '"').replace(/[–—]/g, "-").replace(/[’‘]/g, "'").replace(/[“”]/g, '"').replace(/€/g, "EUR").replace(/…/g, "...");
 }
 function makePdf(plan) {
-  const { jsPDF } = window.jspdf;
+  const T = L[plan.lang || "fr"], { jsPDF } = window.jspdf;
+  const hasDisc = plan.stages.some(s => s.items.some(it => it.discount));
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const W = doc.internal.pageSize.getWidth(), M = 15;
   doc.setTextColor(15, 110, 86); doc.setFont("helvetica", "bold"); doc.setFontSize(16);
-  doc.text("Cabinet dentaire - Plan de traitement", M, 18);
+  doc.text(T.title, M, 18);
   doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(95, 107, 112);
-  doc.text(`Date : ${new Date().toLocaleDateString("fr-FR")}    Version ${plan.version}`, M, 24);
+  doc.text(`${T.date} : ${new Date().toLocaleDateString(plan.lang === "en" ? "en-GB" : "fr-FR")}    ${T.version} ${plan.version}`, M, 24);
   doc.setDrawColor(15, 110, 86); doc.line(M, 27, W - M, 27);
   doc.setTextColor(31, 42, 48); doc.setFont("helvetica", "bold"); doc.setFontSize(11);
-  doc.text(pdfText("Patient : " + plan.patient), M, 34);
+  doc.text(pdfText(`${T.patient} : ${plan.patient}`), M, 34);
   let y = 40;
   if (plan.summary) {
     doc.setFont("helvetica", "normal"); doc.setFontSize(9.5);
     const lines = doc.splitTextToSize(pdfText(plan.summary), W - 2 * M);
     doc.text(lines, M, y); y += lines.length * 4.5 + 3;
   }
+  const R = (c) => ({ content: c, styles: { halign: "right" } });
   for (const s of plan.stages) {
+    const ncol = hasDisc ? 7 : 6;
     doc.autoTable({
       startY: y, margin: { left: M, right: M },
-      head: [[{ content: pdfText(s.name + (s.interval ? "   (" + s.interval + ")" : "")), colSpan: 6,
+      head: [[{ content: pdfText(s.name + (s.interval ? "   (" + s.interval + ")" : "")), colSpan: ncol,
                 styles: { fillColor: [225, 245, 238], textColor: [8, 80, 65], fontSize: 10.5 } }],
-             ["Code", "Acte", "Dent", { content: "Qté", styles: { halign: "right" } }, { content: "Prix unit.", styles: { halign: "right" } }, { content: "Sous-total", styles: { halign: "right" } }]],
-      body: s.items.map(it => [it.code, pdfText(it.label), it.tooth, String(it.qty), eur(it.unit_price), eur(it.subtotal)]),
-      foot: [[{ content: "Total de l'étape", colSpan: 5, styles: { halign: "right" } }, eur(s.stage_total)]],
+             [T.code, T.act, T.tooth, R(T.qty), R(T.unit), ...(hasDisc ? [R(T.disc)] : []), R(T.sub)]],
+      body: s.items.map(it => [it.code, pdfText(it.label), it.tooth, String(it.qty), eur(it.unit_price),
+                               ...(hasDisc ? [it.discount ? (it.discount === 100 ? T.free : "-" + it.discount + "%") : ""] : []), eur(it.subtotal)]),
+      foot: [[{ content: T.stageTotal, colSpan: ncol - 1, styles: { halign: "right" } }, eur(s.stage_total)]],
       theme: "plain", styles: { fontSize: 8.5, cellPadding: 1.6 },
       headStyles: { textColor: [95, 107, 112], fontStyle: "bold", lineWidth: { bottom: 0.2 }, lineColor: [200, 200, 200] },
       footStyles: { fontStyle: "bold", lineWidth: { top: 0.2 }, lineColor: [200, 200, 200] },
-      columnStyles: { 0: { cellWidth: 16 }, 2: { cellWidth: 12 }, 3: { cellWidth: 10, halign: "right" },
-                      4: { cellWidth: 24, halign: "right" }, 5: { cellWidth: 26, halign: "right" } },
+      columnStyles: hasDisc
+        ? { 0: { cellWidth: 15 }, 2: { cellWidth: 11 }, 3: { cellWidth: 9, halign: "right" }, 4: { cellWidth: 22, halign: "right" }, 5: { cellWidth: 16, halign: "right" }, 6: { cellWidth: 24, halign: "right" } }
+        : { 0: { cellWidth: 16 }, 2: { cellWidth: 12 }, 3: { cellWidth: 10, halign: "right" }, 4: { cellWidth: 24, halign: "right" }, 5: { cellWidth: 26, halign: "right" } },
     });
     y = doc.lastAutoTable.finalY + 5;
   }
   if (y > 260) { doc.addPage(); y = 20; }
   doc.setFillColor(15, 110, 86); doc.rect(M, y, W - 2 * M, 10, "F");
   doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(12);
-  doc.text("TOTAL DU PLAN DE TRAITEMENT", M + 3, y + 6.8);
+  doc.text(T.total, M + 3, y + 6.8);
   doc.text(eur(plan.total), W - M - 3, y + 6.8, { align: "right" });
   y += 17; doc.setTextColor(31, 42, 48);
-  for (const [title, lines] of [["Hypothèses", plan.assumptions], ["Points à confirmer", plan.questions.map(q => q.question)]]) {
+  for (const [title, lines] of [[T.hyp, plan.assumptions], [T.toConfirm, plan.questions.map(q => q.question)]]) {
     if (!lines.length) continue;
     if (y > 270) { doc.addPage(); y = 20; }
     doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.text(title, M, y); y += 5;
     doc.setFont("helvetica", "normal"); doc.setFontSize(9);
     for (const l of lines) {
-      const t = doc.splitTextToSize("- " + pdfText(l), W - 2 * M);
-      if (y + t.length * 4.5 > 285) { doc.addPage(); y = 20; }
-      doc.text(t, M, y); y += t.length * 4.5;
+      const tt = doc.splitTextToSize("- " + pdfText(l), W - 2 * M);
+      if (y + tt.length * 4.5 > 285) { doc.addPage(); y = 20; }
+      doc.text(tt, M, y); y += tt.length * 4.5;
     }
     y += 3;
   }
   const pages = doc.getNumberOfPages();
   for (let p = 1; p <= pages; p++) {
     doc.setPage(p); doc.setFontSize(8); doc.setTextColor(150);
-    doc.text(`Devis indicatif - page ${p}/${pages}`, W / 2, 292, { align: "center" });
+    doc.text(`${T.footer} - page ${p}/${pages}`, W / 2, 292, { align: "center" });
   }
   return { doc, url: doc.output("bloburl") };
 }
