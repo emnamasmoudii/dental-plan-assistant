@@ -94,6 +94,11 @@
     <h2><span class="step">1</span> Dictée du dentiste</h2>
     <textarea id="dictation" placeholder="Cliquez sur « Dicter » et parlez, ou tapez les notes du dentiste ici..."></textarea>
     <div class="row">
+      <select id="micLang" title="Langue de la dictée">
+        <option value="en-US" selected>🇬🇧 English</option>
+        <option value="en-GB">🇬🇧 English (UK)</option>
+        <option value="fr-FR">🇫🇷 Français</option>
+      </select>
       <button id="micBtn">🎤 Dicter</button>
       <button id="exampleBtn">Exemple (FR)</button>
       <button id="exampleEnBtn">Example (EN notes)</button>
@@ -157,17 +162,34 @@ const EXAMPLE = "Patiente de 45 ans. Détartrage complet avant tout. Extraction 
 // ---------------------------------------------------------------- Dictée (reconnaissance vocale du navigateur)
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null, recording = false, baseText = "";
+try { const saved = localStorage.getItem("micLang"); if (saved) $("micLang").value = saved; } catch (e) {}
+$("micLang").onchange = () => { try { localStorage.setItem("micLang", $("micLang").value); } catch (e) {} if (recording) rec.stop(); };
+// Corrige quelques mots dentaires souvent mal reconnus par la dictée
+function fixDental(s) {
+  return s
+    .replace(/\b(s\.? ?r\.? ?p\.?|ess are pee|SRP's)\b/gi, "SRP")
+    .replace(/\bsigh? ?nus lift\b|\bsinus left\b|\bsign us lift\b/gi, "sinus lift")
+    .replace(/\bzirconium\b|\bzirconia's\b/gi, "zirconia")
+    .replace(/\bhealing a? ?butt?ments?\b/gi, "healing abutments")
+    .replace(/\bjin?gival\b|\bgin jival\b/gi, "gingival")
+    .replace(/\bstraw man\b|\bstraumann's\b/gi, "Straumann")
+    .replace(/\bmega ?gen\b/gi, "Megagen")
+    .replace(/\bos ?stem\b/gi, "Osstem")
+    .replace(/\bnew line\b|\bnext line\b/gi, "\n")
+    .replace(/\bstage (one|two|three|four|five)\b/gi, (m, w) => "\nStage " + { one: 1, two: 2, three: 3, four: 4, five: 5 }[w.toLowerCase()])
+    .replace(/\b(stage \d)/gi, "\n$1");
+}
 if (!SR) { $("micBtn").disabled = true; $("micStatus").textContent = "Dictée vocale indisponible dans ce navigateur : utilisez Chrome ou Edge, ou tapez le texte."; }
 $("micBtn").onclick = () => {
   if (recording) { rec.stop(); return; }
-  rec = new SR(); rec.lang = "fr-FR"; rec.continuous = true; rec.interimResults = true;
+  rec = new SR(); rec.lang = $("micLang").value; rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 1;
   baseText = $("dictation").value.trim();
   rec.onresult = (ev) => {
     let final = "", interim = "";
     for (let i = 0; i < ev.results.length; i++) {
       (ev.results[i].isFinal ? (final += ev.results[i][0].transcript + " ") : (interim += ev.results[i][0].transcript));
     }
-    $("dictation").value = (baseText + " " + final + interim).trim();
+    $("dictation").value = (baseText + " " + fixDental(final) + interim).trim();
     refreshGen();
   };
   rec.onerror = (e) => { $("micStatus").textContent = "Micro : " + (e.error === "not-allowed" ? "accès refusé (autorisez le micro)" : e.error); };
