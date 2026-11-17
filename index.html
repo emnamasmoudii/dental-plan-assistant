@@ -73,6 +73,12 @@
   details summary::-webkit-details-marker { display:none; }
   details[open] summary { margin-bottom:14px; }
   .versions button { margin:6px 6px 0 0; }
+  .corr { margin-top:16px; padding:16px 18px; border-radius:12px; background:#f8fbfa; border:1px dashed #cfe3dc; }
+  .corr h3 { margin:0 0 4px; font-size:15px; font-weight:600; }
+  .corr p { margin:0 0 10px; }
+  .corr textarea { min-height:80px; background:#fff; }
+  #corrMicBtn { border-radius:999px; background:var(--accent-soft); color:var(--accent); border-color:transparent; font-weight:500; }
+  .applied { margin-top:10px; font-size:13px; color:var(--muted); }
   .hidden { display:none !important; }
   footer { text-align:center; font-size:12px; color:var(--muted); padding-bottom:28px; }
 </style>
@@ -117,10 +123,20 @@
 
   <!-- 3. Questions -->
   <section class="card hidden" id="qCard">
-    <h2><span class="step">3</span> Questions de l'agent</h2>
+    <h2><span class="step">3</span> Questions et corrections</h2>
     <div id="qList"></div>
+    <div class="corr">
+      <h3 id="corrTitle">✏️ Quelque chose est faux ou manquant ?</h3>
+      <p class="status" id="corrHelp">Dites-le simplement, par exemple : « add a scan of 2 implants in stage 2 », « remove the sinus lift »,
+        « replace Megagen with Straumann », « change the healing abutments in stage 2 to 4 », « no sedation ».</p>
+      <textarea id="corrText" placeholder="Dictez ou tapez vos corrections ici…"></textarea>
+      <div class="row">
+        <button id="corrMicBtn">🎤 Dicter une correction</button>
+        <span class="status" id="corrMicStatus"></span>
+      </div>
+    </div>
     <div class="row">
-      <button id="regenBtn" class="primary">Régénérer le PDF avec mes réponses</button>
+      <button id="regenBtn" class="primary">Régénérer le PDF</button>
       <span class="status" id="regenStatus"></span>
     </div>
     <div class="versions" id="versions"></div>
@@ -158,10 +174,11 @@ const CATALOG = [["1.36.", "Restorative dentistry (treatment)", "Single-use hygi
 </script>
 
 <script type="module">
-import * as webllm from "https://esm.run/@mlc-ai/web-llm@0.2.88";
+// La librairie d'IA est chargée seulement quand on utilise le mode IA : si elle est bloquée, le reste du site fonctionne.
+const loadWebLLM = () => import("https://esm.run/@mlc-ai/web-llm@0.2.88");
 
 const $ = (id) => document.getElementById(id);
-const state = { engine: null, loading: null, plans: [], pdfs: [], raws: [], answers: {}, dictation: "" };
+const state = { engine: null, loading: null, plans: [], pdfs: [], raws: [], answers: {}, corrections: [], lastNotDone: [], dictation: "" };
 const EXAMPLE_EN = `PATIENT 1
 Stage 1
 • SRP (scaling and root planing), 1 segment
@@ -181,9 +198,9 @@ const EXAMPLE = "Patiente de 45 ans. Détartrage complet avant tout. Extraction 
 
 // ---------------------------------------------------------------- Dictée (reconnaissance vocale du navigateur)
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let rec = null, recording = false, baseText = "";
+let rec = null, recBtn = null;
 try { const saved = localStorage.getItem("micLang"); if (saved) $("micLang").value = saved; } catch (e) {}
-$("micLang").onchange = () => { try { localStorage.setItem("micLang", $("micLang").value); } catch (e) {} if (recording) rec.stop(); };
+$("micLang").onchange = () => { try { localStorage.setItem("micLang", $("micLang").value); } catch (e) {} if (rec) rec.stop(); };
 // Corrige quelques mots dentaires souvent mal reconnus par la dictée
 function fixDental(s) {
   return s
@@ -196,28 +213,38 @@ function fixDental(s) {
     .replace(/\bmega ?gen\b/gi, "Megagen")
     .replace(/\bos ?stem\b/gi, "Osstem")
     .replace(/\bnew line\b|\bnext line\b/gi, "\n")
-    .replace(/\bstage (one|two|three|four|five)\b/gi, (m, w) => "\nStage " + { one: 1, two: 2, three: 3, four: 4, five: 5 }[w.toLowerCase()])
-    .replace(/\b(stage \d)/gi, "\n$1");
+    .replace(/\bstage (one|two|three|four|five)\b/gi, (m, w) => "Stage " + { one: 1, two: 2, three: 3, four: 4, five: 5 }[w.toLowerCase()])
+    .replace(/(?<!\b(?:in|from|to|of|into|for) )\b(stage \d)/gi, "\n$1");
 }
-if (!SR) { $("micBtn").disabled = true; $("micStatus").textContent = "Dictée vocale indisponible dans ce navigateur : utilisez Chrome ou Edge, ou tapez le texte."; }
-$("micBtn").onclick = () => {
-  if (recording) { rec.stop(); return; }
-  rec = new SR(); rec.lang = $("micLang").value; rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 1;
-  baseText = $("dictation").value.trim();
-  rec.onresult = (ev) => {
+const MIC_LABELS = { micBtn: "🎤 Dicter", corrMicBtn: "🎤 Dicter une correction" };
+if (!SR) {
+  ["micBtn", "corrMicBtn"].forEach(id => $(id).disabled = true);
+  $("micStatus").textContent = "Dictée vocale indisponible dans ce navigateur : utilisez Chrome ou Edge, ou tapez le texte.";
+}
+function toggleDictation(btnId, areaId, statusId) {
+  if (rec) { const same = recBtn === btnId; rec.stop(); if (same) return; }
+  const r = new SR(); r.lang = $("micLang").value; r.continuous = true; r.interimResults = true; r.maxAlternatives = 1;
+  const base = $(areaId).value.trim();
+  r.onresult = (ev) => {
     let final = "", interim = "";
     for (let i = 0; i < ev.results.length; i++) {
       (ev.results[i].isFinal ? (final += ev.results[i][0].transcript + " ") : (interim += ev.results[i][0].transcript));
     }
-    $("dictation").value = (baseText + " " + fixDental(final) + interim).trim();
+    $(areaId).value = (base + (base ? "\n" : "") + fixDental(final) + interim).trim();
     refreshGen();
   };
-  rec.onerror = (e) => { $("micStatus").textContent = "Micro : " + (e.error === "not-allowed" ? "accès refusé (autorisez le micro)" : e.error); };
-  rec.onend = () => { recording = false; $("micBtn").textContent = "🎤 Dicter"; $("micBtn").classList.remove("rec"); $("micStatus").textContent = ""; };
-  rec.start(); recording = true;
-  $("micBtn").textContent = "⏹ Arrêter"; $("micBtn").classList.add("rec");
-  $("micStatus").textContent = "Parlez... le texte apparaît en direct.";
-};
+  r.onerror = (e) => { $(statusId).textContent = "Micro : " + (e.error === "not-allowed" ? "accès refusé (autorisez le micro)" : e.error); };
+  r.onend = () => {
+    if (rec === r) { rec = null; recBtn = null; }
+    $(btnId).textContent = MIC_LABELS[btnId]; $(btnId).classList.remove("rec");
+    if (!/Micro/.test($(statusId).textContent)) $(statusId).textContent = "";
+  };
+  rec = r; recBtn = btnId; r.start();
+  $(btnId).textContent = "⏹ Arrêter"; $(btnId).classList.add("rec");
+  $(statusId).textContent = "Parlez… le texte apparaît en direct.";
+}
+$("micBtn").onclick = () => toggleDictation("micBtn", "dictation", "micStatus");
+$("corrMicBtn").onclick = () => toggleDictation("corrMicBtn", "corrText", "corrMicStatus");
 
 $("dictation").oninput = refreshGen;
 function refreshGen() { $("genBtn").disabled = !$("dictation").value.trim(); }
@@ -314,8 +341,8 @@ function loadEngine() {
     $("aiStatus").textContent = "Chargement de l'IA : " + p.text;
     $("aiBar").style.width = Math.round((p.progress || 0) * 100) + "%";
   } };
-  state.loading = webllm.CreateMLCEngine(model, cb, { context_window_size: 8192 })
-    .catch(() => webllm.CreateMLCEngine(model, cb))   // si 8192 est refusé, contexte par défaut
+  state.loading = loadWebLLM().then((webllm) => webllm.CreateMLCEngine(model, cb, { context_window_size: 8192 })
+      .catch(() => webllm.CreateMLCEngine(model, cb)))   // si 8192 est refusé, contexte par défaut
     .then((engine) => {
       state.engine = engine;
       $("aiStatus").textContent = "✅ IA prête (" + model.replace("-q4f16_1-MLC", "") + "), elle tourne dans votre navigateur.";
@@ -736,13 +763,110 @@ function fastPlan(text, s = {}) {
   if (s.crown) A.crown = /^st/i.test(s.crown) ? "ST" : "ML";
   if (!useNotes) {
     if (s.wisdom) A.wisdom = ["Grade 1", "Grade 2", "Proche de structures anatomiques"].find(g => norm(s.wisdom).includes(norm(g))) || "Grade 2";
-    if (s.sedation) A.sedation = s.sedation;
+    if (s.sedation) A.sedation = /^(no|sans|non)/i.test(s.sedation) ? "Non" : /^oui/i.test(s.sedation) ? s.sedation
+      : /^2/.test(s.sedation) ? "Oui, 2 heures" : /1 ?h ?30|1[.,]5/.test(s.sedation) ? "Oui, 1 h 30" : "Oui, 1 heure";
     return { ...rulesPlan(text, A), lang: "fr" };
   }
   for (const k of Object.keys(s)) if (/^(graft|disc)\d+$|^resto$|^gdisc$|^implDisc$|^tech$/.test(k)) A[k] = s[k];
   if (s.sedation) A.sedation = /no|sans|non/i.test(s.sedation) ? 0 : (parseInt(s.sedation, 10) || 1);
   if (s.implantPrice) A.implantPrice = /list|liste/i.test(s.implantPrice) ? "list" : money(s.implantPrice);
   return notesPlan(text, A);
+}
+
+// ---------------------------------------------------------------- Corrections (voix ou texte)
+const STOP = new Set(("remove delete drop please the a an of from in to into on at for and with stage stages all it its this that " +
+  "these those also add put include replace change instead should be make use correct only just one " +
+  "supprime supprimer enleve enlever retire retirer ajoute ajouter mets mettre remplace remplacer change changer corrige corriger " +
+  "modifie modifier le la les un une des du de dans a au aux et avec pour etape etapes tout tous il faut aussi pas sans no not without").split(" "));
+const FR2EN = { couronne: "crown", greffe: "graft", detartrage: "hygiene", anesthesie: "anaesthesia", provisoire: "temporary",
+  pilier: "abutment", modele: "model", empreinte: "scan", gingivale: "gingival", osseuse: "bone", scellement: "sealing",
+  cicatrisation: "healing", sedation: "sedation", kit: "kit", sterilisation: "sterilisation", extraction: "extraction" };
+function keyTokens(s) {
+  return norm(s).replace(/[^a-z0-9\s-]/g, " ").split(/\s+/)
+    .filter(w => w && !STOP.has(w) && !/\d/.test(w))
+    .map(w => w.replace(/s$/, "")).map(w => FR2EN[w] || w)
+    .map(w => w.replace(/ies$/, "y")).filter(w => w.length > 2 && !STOP.has(w));
+}
+const WORDN = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, un: 1, une: 1, deux: 2, trois: 3, quatre: 4, cinq: 5 };
+function parseCorrections(list) {
+  const C = { add: [], remove: [], qty: [], A: {}, notes: [] };
+  const brands = Object.keys(BRANDS).map(norm);
+  for (const c of list) {
+    const parts = norm(c).split(/\n|(?<=[a-z0-9)])\.\s+|;|\band then\b|\bpuis\b/).map(x => x.trim()).filter(Boolean);
+    for (const l of parts) {
+      C.notes.push(l);
+      const stM = l.match(/(?:in|from|to|of|for|dans|de|a|en)\s+(?:l')?(?:stage|etape)\s*(\d+)/);
+      const stage = stM ? +stM[1] : null;
+      const body = l.replace(/(?:in|from|to|of|for|dans|de|a|en)\s+(?:l')?(?:stage|etape)\s*\d+/g, " ");
+      const brand = Object.keys(BRANDS).find(b => l.includes(norm(b)));
+      if (/(no|without|remove|delete|sans|pas de|supprime\w*|enleve\w*|retire\w*)\s+(?:the\s+|la\s+)?sedation/.test(l)) { C.A.sedation = "No sedation"; continue; }
+      const sh = l.match(/sedation[^\d]*(\d+)\s*h|(\d+)\s*h(?:ours?|eures?)?\s*(?:of\s*|de\s*)?sedation/);
+      if (sh) { C.A.sedation = (sh[1] || sh[2]) + " h"; continue; }
+      const crownType = /crown|couronne/.test(l) ? (/\bst\b|monolithi/.test(l) ? "ST" : /\bml\b|multi.?lay|multicouche/.test(l) ? "ML" : null) : null;
+      if (crownType) C.A.crown = crownType;
+      // Remplacer / changer
+      let m = l.match(/\b(?:replace|change|swap|remplace\w*|change\w*|corrige\w*|modifie\w*)\s+(.+?)\s+(?:with|by|to|into|for|par|en)\s+(.+)$/);
+      let oldP = null, newP = null;
+      if (m) { oldP = m[1]; newP = m[2]; }
+      else if ((m = l.match(/^(.+?)\s+(?:instead of|au lieu de?s?|au lieu du)\s+(.+)$/))) { newP = m[1]; oldP = m[2]; }
+      if (oldP) {
+        const newBrand = Object.keys(BRANDS).find(b => newP.includes(norm(b)));
+        if (newBrand) { C.A.brand = newBrand; continue; }
+        if (crownType && keyTokens(newP).every(w => ["crown", "zirconia", "zircone", "type", "multi", "layer"].includes(w) || w.length <= 2)) continue;
+        const nm = newP.trim().match(/^(\d+|one|two|three|four|five|six|seven|eight|nine|ten|un|une|deux|trois|quatre|cinq)\b/);
+        const tokensOld = keyTokens(oldP.replace(/(?:in|from|of|dans|de)\s+(?:l')?(?:stage|etape)\s*\d+/g, " "));
+        if (nm && keyTokens(newP).length === 0) { C.qty.push({ tokens: tokensOld, teeth: teethOf(oldP), stage, n: WORDN[nm[1]] ?? +nm[1], text: l }); continue; }
+        C.remove.push({ tokens: tokensOld, teeth: teethOf(oldP), stage, text: l });
+        C.add.push((stage ? `in stage ${stage}, ` : "") + newP);
+        continue;
+      }
+      if (brand && keyTokens(body).every(w => brands.includes(w) || ["implant", "system", "brand", "marque"].includes(w))) { C.A.brand = brand; continue; }
+      if (crownType && keyTokens(body).every(w => ["crown", "zirconia", "zircone", "type", "multi", "layer", "monolithic"].includes(w))) continue;
+      if (brand) C.A.brand = brand;
+      const isRemove = /\b(remove|delete|drop|without|supprime\w*|enleve\w*|retire\w*|sans)\b|^no\b|\bpas de\b|\bnot needed\b|\bpas besoin\b/.test(l);
+      if (isRemove) { C.remove.push({ tokens: keyTokens(body), teeth: teethOf(body), stage, text: l }); continue; }
+      C.add.push(l);
+    }
+  }
+  return C;
+}
+function applyCorrections(raw, C) {
+  const en = raw.lang === "en";
+  const labelOf = (it) => norm(it.label || byCode[it.code]?.label || "");
+  const hit = (it, r) => r.tokens.length && r.tokens.every(tk => labelOf(it).includes(tk)) && (!r.teeth.length || r.teeth.includes(String(it.tooth)));
+  const notDone = [];
+  for (const r of C.remove) {
+    let n = 0;
+    raw.stages.forEach((st, i) => { if (r.stage && i + 1 !== r.stage) return; const before = st.items.length; st.items = st.items.filter(it => !hit(it, r)); n += before - st.items.length; });
+    if (!n) notDone.push(r.text);
+  }
+  for (const q of C.qty) {
+    let n = 0;
+    raw.stages.forEach((st, i) => { if (q.stage && i + 1 !== q.stage) return; st.items.forEach(it => { if (hit(it, q)) { it.qty = q.n; n++; } }); });
+    if (!n) notDone.push(q.text);
+  }
+  raw.stages = raw.stages.filter(s => s.items.length);
+  if (notDone.length) {
+    raw.assumptions.push((en ? "Correction not understood (nothing matched): " : "Correction non comprise (aucun acte trouvé) : ") + notDone.map(x => `“${x}”`).join(", ") + ".");
+    state.lastNotDone = notDone;
+  } else state.lastNotDone = [];
+  return raw;
+}
+function correctedPlan() {
+  const C = parseCorrections(state.corrections);
+  const ans = { ...state.answers, ...C.A };
+  // Une phrase « ajout » qui ne correspond à aucun acte est signalée au lieu d'être ignorée en silence
+  const useful = C.add.filter(l => { try { return fastPlan((detectLang(state.dictation) === "en" ? "stage 1\n" : "") + l, ans).stages.some(s => s.items.length); } catch (e) { return false; } });
+  const unknown = C.add.filter(l => !useful.includes(l));
+  const text = state.dictation + (useful.length ? "\n" + useful.map(l => "• " + l).join("\n") : "");
+  const raw = applyCorrections(fastPlan(text, ans), C);
+  const applied = C.notes.filter(x => !state.lastNotDone.includes(x) && !unknown.includes(x));
+  if (applied.length) raw.assumptions.push((raw.lang === "en" ? "Dentist corrections applied: " : "Corrections du dentiste appliquées : ") + applied.map(x => `“${x}”`).join(", ") + ".");
+  if (unknown.length) {
+    state.lastNotDone = [...state.lastNotDone, ...unknown];
+    raw.assumptions.push((raw.lang === "en" ? "Correction not understood (nothing matched): " : "Correction non comprise (aucun acte trouvé) : ") + unknown.map(x => `“${x}”`).join(", ") + ".");
+  }
+  return raw;
 }
 
 // ---------------------------------------------------------------- Génération
@@ -757,7 +881,7 @@ function finalize(raw, version, m) {
 }
 $("genBtn").onclick = async () => {
   state.dictation = $("dictation").value.trim();
-  state.plans = []; state.pdfs = []; state.raws = []; state.answers = {};
+  state.plans = []; state.pdfs = []; state.raws = []; state.answers = {}; state.corrections = []; $("corrText").value = "";
   if (mode() === "rules") { finalize(fastPlan(state.dictation), 1, "rules"); $("genStatus").textContent = ""; return; }
   busy(true, "genStatus", state.engine ? "L'IA construit le plan... (10 à 60 s)"
                                        : "Chargement de l'IA puis construction du plan... (la première fois : quelques minutes)");
@@ -775,7 +899,10 @@ $("genBtn").onclick = async () => {
 $("regenBtn").onclick = async () => {
   const plan = state.plans.at(-1), raw = state.raws.at(-1);
   const answers = collectAnswers(plan);
-  if (!answers.length) { $("regenStatus").textContent = "Répondez d'abord à au moins une question."; return; }
+  const corr = $("corrText").value.trim();
+  if (!answers.length && !corr) { $("regenStatus").textContent = plan.lang === "en" ? "Answer a question or dictate a correction first." : "Répondez à une question ou dictez une correction."; return; }
+  if (rec) rec.stop();
+  if (corr) state.corrections.push(corr);
   const v = plan.version + 1;
   for (const a of answers) state.answers[a.id] = a.answer;
   const rulesAnswers = () => {
@@ -787,8 +914,12 @@ $("regenBtn").onclick = async () => {
     return A;
   };
   if (plan.mode === "rules") {
-    finalize(fastPlan(state.dictation, state.answers), v, "rules");
-    $("regenStatus").textContent = "✅ PDF version " + v + " généré."; return;
+    finalize(correctedPlan(), v, "rules");
+    $("corrText").value = "";
+    const EN = state.plans.at(-1).lang === "en";
+    $("regenStatus").innerHTML = (EN ? "✅ PDF version " + v + " generated." : "✅ PDF version " + v + " généré.") + (state.lastNotDone.length
+      ? ` <span class="note warn" style="display:inline-block;margin:0">${EN ? "Not understood" : "Non compris"} : ${state.lastNotDone.map(esc).join(" · ")} — ${EN ? "please rephrase (e.g. “remove the scan in stage 2”)" : "reformulez (ex. « supprime le scan à l'étape 2 »)"}.</span>` : "");
+    return;
   }
   busy(true, "regenStatus", "L'IA met à jour le plan...");
   try {
@@ -796,7 +927,8 @@ $("regenBtn").onclick = async () => {
       { role: "system", content: systemPrompt(state.dictation) },
       { role: "user", content: "DICTÉE DU DENTISTE :\n" + state.dictation },
       { role: "assistant", content: JSON.stringify(raw) },
-      { role: "user", content: "RÉPONSES DU DENTISTE :\n" + answers.map(a => `- ${a.question} -> ${a.answer}`).join("\n") +
+      { role: "user", content: (answers.length ? "RÉPONSES DU DENTISTE :\n" + answers.map(a => `- ${a.question} -> ${a.answer}`).join("\n") + "\n" : "") +
+        (state.corrections.length ? "CORRECTIONS DU DENTISTE (à appliquer en priorité : ajouter, retirer ou modifier des actes) :\n" + state.corrections.join("\n") + "\n" : "") +
         "\nMets à jour le plan (actes et étapes) selon ces réponses. Retire les questions résolues. " +
         "Ne pose de nouvelles questions que si c'est indispensable. Réponds uniquement en JSON." },
     ]);
@@ -842,7 +974,7 @@ function render() {
   if (plan.assumptions.length) h += `<div class="note warn"><b>${T.hyp} :</b><br>${plan.assumptions.map(esc).join("<br>")}</div>`;
   $("planView").innerHTML = h;
   $("pdfFrame").src = state.pdfs[i].url;
-  $("dlBtn").textContent = T.dl; $("regenBtn").textContent = T.regen;
+  $("dlBtn").textContent = T.dl;
 
   $("qCard").classList.remove("hidden");
   $("qList").innerHTML = plan.questions.length ? plan.questions.map((q, k) => `
@@ -851,7 +983,16 @@ function render() {
       <label><input type="radio" name="q${k}" value="__other">${T.other}</label></div>
       <input type="text" id="qo${k}" placeholder="${esc(T.otherPh)}"></div>`).join("")
     : `<div class="note ok">${T.noQ}</div>`;
-  $("regenBtn").classList.toggle("hidden", !plan.questions.length);
+  const EN = plan.lang === "en";
+  $("regenBtn").textContent = EN ? "Regenerate the PDF" : "Régénérer le PDF";
+  $("corrTitle").textContent = EN ? "✏️ Something wrong or missing?" : "✏️ Quelque chose est faux ou manquant ?";
+  $("corrHelp").textContent = EN
+    ? "Just say it, for example: “add a scan of 2 implants in stage 2”, “remove the sinus lift”, “replace Megagen with Straumann”, “change the healing abutments in stage 2 to 4”, “no sedation”."
+    : "Dites-le simplement, par exemple : « ajoute un scan de 2 implants à l'étape 2 », « supprime le sinus lift », « remplace Megagen par Straumann », « pas de sédation ».";
+  $("corrText").placeholder = EN ? "Dictate or type your corrections here…" : "Dictez ou tapez vos corrections ici…";
+  MIC_LABELS.corrMicBtn = EN ? "🎤 Dictate a correction" : "🎤 Dicter une correction";
+  if (recBtn !== "corrMicBtn") $("corrMicBtn").textContent = MIC_LABELS.corrMicBtn;
+
   $("versions").innerHTML = state.plans.length > 1
     ? "<div class='status' style='margin-top:12px'>Versions :</div>" + state.plans.map((p, k) =>
         `<button data-k="${k}">PDF v${p.version} · ${eur(p.total)}</button>`).join("")
